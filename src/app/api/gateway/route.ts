@@ -8,25 +8,51 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import WebSocket from 'ws';
 
-interface GatewaySession {
+/** Mirrors openclaw's GatewaySessionRow (not re-exported from plugin-sdk). */
+type GatewaySessionRow = {
   key: string;
-  kind: string;
-  channel: string;
-  displayName: string;
-  updatedAt: number;
-  sessionId: string;
-  model: string;
-  contextTokens: number;
-  totalTokens: number;
-  abortedLastRun: boolean;
-  lastChannel: string;
+  kind: "direct" | "group" | "global" | "unknown";
+  label?: string;
+  displayName?: string;
+  derivedTitle?: string;
+  lastMessagePreview?: string;
+  channel?: string;
+  subject?: string;
+  groupChannel?: string;
+  space?: string;
+  updatedAt: number | null;
+  sessionId?: string;
   systemSent?: boolean;
-}
+  abortedLastRun?: boolean;
+  thinkingLevel?: string;
+  verboseLevel?: string;
+  reasoningLevel?: string;
+  elevatedLevel?: string;
+  sendPolicy?: "allow" | "deny";
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  responseUsage?: "on" | "off" | "tokens" | "full";
+  modelProvider?: string;
+  model?: string;
+  contextTokens?: number;
+  lastChannel?: string;
+  lastTo?: string;
+  lastAccountId?: string;
+};
 
-interface SessionListResult {
+/** Mirrors openclaw's SessionsListResult (not re-exported from plugin-sdk). */
+type SessionsListResult = {
+  ts: number;
+  path: string;
   count: number;
-  sessions: GatewaySession[];
-}
+  defaults: {
+    modelProvider: string | null;
+    model: string | null;
+    contextTokens: number | null;
+  };
+  sessions: GatewaySessionRow[];
+};
 
 // Read config to get gateway URL + token
 function readOpenClawConfig(): { url: string; token: string } | null {
@@ -171,20 +197,23 @@ export async function GET() {
   }
 
   try {
-    const result = await gatewayRequest(config.url, config.token, 'sessions.list', {}) as SessionListResult;
+    const result = await gatewayRequest(config.url, config.token, 'sessions.list', {}) as SessionsListResult;
     const now = Date.now();
 
     const sessions = (result.sessions ?? []).map((s) => {
-      const age = now - s.updatedAt;
+      const age = s.updatedAt != null ? now - s.updatedAt : null;
       const isSubagent = s.key.includes('subagent');
 
       // Infer behavior from timing — this is best-effort since gateway
-      // doesn't expose explicit agent state
+      // doesn't expose explicit agent state.
+      // When updatedAt is null we have no timing info, so default to idle.
       let behavior = 'idle';
       let isActive = false;
 
       if (s.abortedLastRun) {
         behavior = 'dead';
+      } else if (age == null) {
+        behavior = 'idle';
       } else if (age < 30000) {
         behavior = 'coding';
         isActive = true;
@@ -234,7 +263,7 @@ export async function GET() {
       // Group key: for "agent:main:main" → "agent:main", for subagents keep full key
       const groupKey = sess.isSubagent ? sess.key : sess.key.split(':').slice(0, 2).join(':');
       const existing = sessionMap.get(groupKey);
-      if (!existing || sess.totalTokens > existing.totalTokens || (sess.totalTokens === existing.totalTokens && sess.lastActivity > existing.lastActivity)) {
+      if (!existing || sess.totalTokens > existing.totalTokens || (sess.totalTokens === existing.totalTokens && (sess.lastActivity ?? 0) > (existing.lastActivity ?? 0))) {
         sessionMap.set(groupKey, sess);
       }
     }
