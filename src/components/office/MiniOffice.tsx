@@ -34,10 +34,10 @@ export default function MiniOffice({ agents, agentStates, ownerConfig, theme }: 
           Full View →
         </Link>
       </div>
-      <Link href="/office" className="block group">
+      <Link href="/office" className="block group flex justify-center">
         <div
           className="relative rounded-xl overflow-hidden transition-all duration-300 group-hover:ring-2"
-          style={{ border: '1px solid var(--border)' }}
+          style={{ border: '1px solid var(--border)', maxWidth: 900 }}
         >
           {/* Render at full resolution (1100x620) but display scaled down */}
           <OfficeCanvasInner
