@@ -142,6 +142,18 @@ export async function POST(request: Request) {
         return NextResponse.json({ ok: true, result });
       }
 
+      case 'history': {
+        if (!sessionKey) {
+          return NextResponse.json({ error: 'sessionKey required' }, { status: 400 });
+        }
+        const limit = (body as { limit?: number }).limit ?? 20;
+        const result = await gatewayRequest(config.url, config.token, 'chat.history', {
+          sessionKey,
+          limit,
+        });
+        return NextResponse.json({ ok: true, result });
+      }
+
       default:
         return NextResponse.json({ error: `Unknown action: ${action}` }, { status: 400 });
     }

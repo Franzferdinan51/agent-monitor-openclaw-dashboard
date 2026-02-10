@@ -305,6 +305,110 @@ export function useAgents(forceDemoMode = false): UseAgentsReturn {
     }
   }, [sessionKeys, agents, pollGateway]);
 
+  // Poll chat history for the agent's reply after sending a message
+  const pollForReply = useCallback(async (agentId: string, key: string, _sentTimestamp: number) => {
+    const maxAttempts = 60; // Up to 2 min (60 × 2s)
+    const pollInterval = 2000;
+
+    // First, get the current message count so we know when a new one appears
+    let baselineAssistantCount = 0;
+    try {
+      const baseResp = await fetch('/api/gateway/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'history', sessionKey: key, limit: 50 }),
+      });
+      const baseData = await baseResp.json();
+      if (baseData.ok && baseData.result?.messages) {
+        baselineAssistantCount = (baseData.result.messages as Array<{ role: string }>)
+          .filter(m => m.role === 'assistant').length;
+      }
+    } catch {
+      // If we can't get baseline, just use 0 — will match first assistant msg
+    }
+
+    // Add a "thinking" indicator
+    const thinkingId = `msg-${Date.now()}-thinking`;
+    setChatMessages(prev => ({
+      ...prev,
+      [agentId]: [...(prev[agentId] || []), {
+        id: thinkingId,
+        agentId,
+        role: 'agent' as const,
+        content: '💭 Thinking...',
+        timestamp: Date.now(),
+      }],
+    }));
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      await new Promise(r => setTimeout(r, pollInterval));
+
+      try {
+        const resp = await fetch('/api/gateway/action', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'history', sessionKey: key, limit: 50 }),
+        });
+        const data = await resp.json();
+
+        if (data.ok && data.result?.messages) {
+          const messages = data.result.messages as Array<{
+            role: string;
+            content?: string | Array<{ type: string; text?: string }>;
+          }>;
+
+          const assistantMessages = messages.filter(m => m.role === 'assistant');
+
+          // Check if we have a NEW assistant message (count increased)
+          if (assistantMessages.length > baselineAssistantCount) {
+            const lastAssistant = assistantMessages[assistantMessages.length - 1];
+            
+            // Extract text from content (can be string or content blocks array)
+            let content = '';
+            if (typeof lastAssistant.content === 'string') {
+              content = lastAssistant.content;
+            } else if (Array.isArray(lastAssistant.content)) {
+              content = lastAssistant.content
+                .filter((b) => b.type === 'text' && b.text)
+                .map((b) => b.text)
+                .join('\n');
+            }
+
+            if (content) {
+              // Truncate very long responses for chat display
+              const displayContent = content.length > 2000 
+                ? content.slice(0, 2000) + '\n\n…(truncated)'
+                : content;
+
+              // Replace the thinking indicator with the actual reply
+              setChatMessages(prev => ({
+                ...prev,
+                [agentId]: (prev[agentId] || []).map(m =>
+                  m.id === thinkingId
+                    ? { ...m, id: `msg-${Date.now()}-agent`, content: displayContent, timestamp: Date.now() }
+                    : m
+                ),
+              }));
+              return;
+            }
+          }
+        }
+      } catch {
+        // Ignore poll errors, keep trying
+      }
+    }
+
+    // Timeout — replace thinking with timeout message
+    setChatMessages(prev => ({
+      ...prev,
+      [agentId]: (prev[agentId] || []).map(m =>
+        m.id === thinkingId
+          ? { ...m, content: '⏱️ No reply yet (agent may still be processing)', timestamp: Date.now() }
+          : m
+      ),
+    }));
+  }, []);
+
   const sendChat = useCallback((agentId: string, message: string) => {
     const userMsg: ChatMessage = {
       id: `msg-${Date.now()}-user`,
@@ -333,41 +437,45 @@ export function useAgents(forceDemoMode = false): UseAgentsReturn {
         }));
       }, 1000 + Math.random() * 2000);
     } else {
-      // Real mode: send via gateway
+      // Real mode: send via gateway, then poll for reply
       const key = sessionKeys[agentId];
       if (key) {
+        const sentAt = Date.now();
         fetch('/api/gateway/action', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'send', sessionKey: key, message }),
         }).then(resp => resp.json()).then(data => {
-          const response: ChatMessage = {
-            id: `msg-${Date.now()}-agent`,
-            agentId,
-            role: 'agent',
-            content: data.ok ? '✅ Message sent to session' : `❌ ${data.error}`,
-            timestamp: Date.now(),
-          };
-          setChatMessages(prev => ({
-            ...prev,
-            [agentId]: [...(prev[agentId] || []), response],
-          }));
+          if (data.ok) {
+            // Start polling for the agent's actual reply
+            pollForReply(agentId, key, sentAt);
+          } else {
+            setChatMessages(prev => ({
+              ...prev,
+              [agentId]: [...(prev[agentId] || []), {
+                id: `msg-${Date.now()}-agent`,
+                agentId,
+                role: 'agent' as const,
+                content: `❌ ${data.error}`,
+                timestamp: Date.now(),
+              }],
+            }));
+          }
         }).catch(() => {
-          const response: ChatMessage = {
-            id: `msg-${Date.now()}-agent`,
-            agentId,
-            role: 'agent',
-            content: '❌ Failed to send message',
-            timestamp: Date.now(),
-          };
           setChatMessages(prev => ({
             ...prev,
-            [agentId]: [...(prev[agentId] || []), response],
+            [agentId]: [...(prev[agentId] || []), {
+              id: `msg-${Date.now()}-agent`,
+              agentId,
+              role: 'agent' as const,
+              content: '❌ Failed to send message',
+              timestamp: Date.now(),
+            }],
           }));
         });
       }
     }
-  }, [demoMode, sessionKeys]);
+  }, [demoMode, sessionKeys, pollForReply]);
 
   return {
     agents,
