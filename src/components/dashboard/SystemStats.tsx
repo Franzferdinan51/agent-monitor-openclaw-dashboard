@@ -13,9 +13,16 @@ interface SystemStatsProps {
 }
 
 function AnimatedNumber({ value, format }: { value: number; format?: (n: number) => string }) {
-  const [display, setDisplay] = useState(value);
+  const [mounted, setMounted] = useState(false);
+  const [display, setDisplay] = useState(0);
 
   useEffect(() => {
+    setMounted(true);
+    setDisplay(value);
+  }, []);  // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!mounted) return;
     const diff = value - display;
     if (Math.abs(diff) < 1) {
       setDisplay(value);
@@ -26,7 +33,10 @@ function AnimatedNumber({ value, format }: { value: number; format?: (n: number)
       setDisplay(prev => prev + (diff > 0 ? step : -step));
     }, 30);
     return () => clearTimeout(timer);
-  }, [value, display]);
+  }, [value, display, mounted]);
+
+  // SSR: render placeholder dash to avoid hydration mismatch
+  if (!mounted) return <span className="font-pixel">-</span>;
 
   return <span className="font-pixel">{format ? format(Math.round(display)) : Math.round(display)}</span>;
 }
