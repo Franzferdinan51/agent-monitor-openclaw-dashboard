@@ -18,6 +18,42 @@ Watch your AI agents work in a **pixel-art office**. Monitor status, chat with t
 
 ## ⚡ Quick Start
 
+### Option 1: OpenClaw Plugin (recommended)
+
+If you have [OpenClaw](https://github.com/nicepkg/openclaw) installed:
+
+```bash
+openclaw plugins install @openclaw/agent-monitor
+openclaw gateway restart
+```
+
+Dashboard is now live at **http://localhost:3200** — auto-connects to your gateway, zero config.
+
+**Configure (optional):**
+```json5
+{
+  "plugins": {
+    "entries": {
+      "agent-monitor": {
+        "enabled": true,
+        "config": {
+          "port": 3200,       // default
+          "host": "0.0.0.0"   // default, use "127.0.0.1" to restrict to localhost
+        }
+      }
+    }
+  }
+}
+```
+
+**CLI:**
+```bash
+openclaw monitor          # Show dashboard URL
+openclaw monitor --open   # Open in browser
+```
+
+### Option 2: Standalone (no OpenClaw required)
+
 ```bash
 git clone https://github.com/ruiqili2/agent-monitor.git
 cd agent-monitor
@@ -25,11 +61,11 @@ npm install
 npm run dev
 ```
 
-Open **http://localhost:3000** — that's it. The app starts in **Demo Mode** with 3 animated agents.
+Open **http://localhost:3000** — starts in **Demo Mode** with 3 animated agents.
 
 ### Connect to OpenClaw Gateway
 
-To monitor your real agents, either:
+To monitor your real agents (standalone mode), either:
 
 **Option A — URL params (fastest):**
 ```
@@ -104,8 +140,10 @@ http://localhost:3000?gateway=http://localhost:18789&token=YOUR_TOKEN
 ## 🏗️ Architecture
 
 ```
-src/
-├── app/                    # Next.js App Router pages
+├── plugin.ts               # OpenClaw plugin entry point
+├── openclaw.plugin.json    # Plugin manifest
+├── src/
+│   ├── app/                    # Next.js App Router pages
 │   ├── page.tsx            #   Dashboard (/)
 │   ├── office/page.tsx     #   Full office view (/office)
 │   └── agent/[id]/page.tsx #   Agent detail (/agent/:id)
@@ -198,11 +236,10 @@ Test coverage includes:
 - [x] Chat with agents (send + receive replies)
 - [x] 4 themes + full customization
 - [x] Test suite (91 tests)
+- [x] **OpenClaw Plugin** — `openclaw plugins install @openclaw/agent-monitor`
 - [ ] Persistent WebSocket connection (replace per-request connections)
 - [ ] Real-time event subscription (replace HTTP polling)
 - [ ] Cloudflare Tunnel support for remote access
-- [ ] OpenClaw Plugin packaging (`openclaw plugins install @openclaw/agent-monitor`)
-- [ ] npm package (`npx agent-monitor`)
 
 ---
 

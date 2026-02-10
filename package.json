@@ -1,7 +1,8 @@
 {
-  "name": "agent-monitor",
+  "name": "@openclaw/agent-monitor",
   "version": "0.1.0",
-  "private": true,
+  "description": "Real-time AI agent visualization & monitoring dashboard for OpenClaw — pixel-art office, 18 behaviors, chat, 4 themes",
+  "type": "module",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -9,8 +10,44 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "prepublishOnly": "npm run build"
   },
+  "keywords": [
+    "openclaw",
+    "agent",
+    "monitor",
+    "dashboard",
+    "pixel-art",
+    "ai",
+    "visualization"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruiqili2/agent-monitor.git"
+  },
+  "homepage": "https://github.com/ruiqili2/agent-monitor#readme",
+  "openclaw": {
+    "extensions": [
+      "./plugin.ts"
+    ]
+  },
+  "files": [
+    "plugin.ts",
+    "openclaw.plugin.json",
+    ".next/standalone/**",
+    ".next/static/**",
+    "public/**",
+    "src/**",
+    "next.config.ts",
+    "tsconfig.json",
+    "tailwind.config.ts",
+    "postcss.config.mjs",
+    "package.json",
+    "README.md",
+    "LICENSE"
+  ],
   "dependencies": {
     "next": "16.1.6",
     "react": "19.2.3",

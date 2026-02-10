@@ -30,6 +30,16 @@ interface SessionListResult {
 
 // Read config to get gateway URL + token
 function readOpenClawConfig(): { url: string; token: string } | null {
+  // Check env vars first (set by plugin mode)
+  const envPort = process.env.OPENCLAW_GATEWAY_PORT;
+  const envToken = process.env.OPENCLAW_GATEWAY_TOKEN;
+  if (envPort) {
+    return {
+      url: `ws://127.0.0.1:${envPort}`,
+      token: envToken ?? '',
+    };
+  }
+
   try {
     const home = process.env.USERPROFILE || process.env.HOME || '';
     const configPath = join(home, '.openclaw', 'openclaw.json');

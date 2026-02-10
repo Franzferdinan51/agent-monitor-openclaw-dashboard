@@ -1,0 +1,36 @@
+{
+  "id": "agent-monitor",
+  "name": "Agent Monitor",
+  "description": "Real-time AI agent visualization & monitoring dashboard with pixel-art office",
+  "version": "0.1.0",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      },
+      "port": {
+        "type": "integer",
+        "minimum": 1024,
+        "maximum": 65535
+      },
+      "host": {
+        "type": "string"
+      }
+    }
+  },
+  "uiHints": {
+    "enabled": {
+      "label": "Enable Agent Monitor"
+    },
+    "port": {
+      "label": "Dashboard Port",
+      "placeholder": "3200"
+    },
+    "host": {
+      "label": "Bind Address",
+      "placeholder": "0.0.0.0"
+    }
+  }
+}
