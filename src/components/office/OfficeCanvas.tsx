@@ -5,7 +5,7 @@
 'use client';
 
 import { useRef, useEffect, useCallback } from 'react';
-import type { OfficeState, AgentConfig, OwnerConfig, AgentDashboardState, ThemeName } from '@/lib/types';
+import type { OfficeState, AgentConfig, OwnerConfig } from '@/lib/types';
 import { renderFrame } from '@/engine/canvas';
 
 interface OfficeCanvasProps {
@@ -13,31 +13,33 @@ interface OfficeCanvasProps {
   agents: AgentConfig[];
   owner: OwnerConfig;
   onTick: () => void;
+  /** Internal canvas resolution width */
   width?: number;
+  /** Internal canvas resolution height */
   height?: number;
+  /** CSS display width (if different from canvas resolution) */
+  displayWidth?: number;
+  /** CSS display height (if different from canvas resolution) */
+  displayHeight?: number;
   className?: string;
   scale?: number;
-  onAgentClick?: (agentId: string) => void;
+  demoMode?: boolean;
+  connected?: boolean;
 }
 
-// Wrapper props for pages that don't manage their own officeState
-interface OfficeCanvasWrapperProps {
-  agents: AgentConfig[];
-  agentStates: Record<string, AgentDashboardState>;
-  ownerConfig: OwnerConfig;
-  theme: ThemeName;
-  onAgentClick?: (agentId: string) => void;
-}
-
-function OfficeCanvasInner({
+export default function OfficeCanvasInner({
   officeState,
   agents,
   owner,
   onTick,
-  width = 1000,
-  height = 600,
+  width = 1100,
+  height = 620,
+  displayWidth,
+  displayHeight,
   className = '',
   scale = 1,
+  demoMode = true,
+  connected = false,
 }: OfficeCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animRef = useRef<number>(0);
@@ -61,15 +63,15 @@ function OfficeCanvasInner({
       renderFrame(ctx, width, height, officeState, {
         agents,
         owner,
-        connected: true,
-        demoMode: true,
+        connected,
+        demoMode,
       });
 
       ctx.restore();
     }
 
     animRef.current = requestAnimationFrame(render);
-  }, [officeState, agents, owner, onTick, width, height, scale]);
+  }, [officeState, agents, owner, connected, demoMode, onTick, width, height, scale]);
 
   useEffect(() => {
     animRef.current = requestAnimationFrame(render);
@@ -80,6 +82,9 @@ function OfficeCanvasInner({
     };
   }, [render]);
 
+  const cssWidth = displayWidth ?? width;
+  const cssHeight = displayHeight ?? height;
+
   return (
     <canvas
       ref={canvasRef}
@@ -87,29 +92,12 @@ function OfficeCanvasInner({
       height={Math.round(height * scale)}
       className={`rounded-xl ${className}`}
       style={{
-        width,
-        height,
+        width: cssWidth,
+        height: cssHeight,
+        maxWidth: '100%',
         imageRendering: 'pixelated',
         backgroundColor: '#0a0a0f',
       }}
-    />
-  );
-}
-
-export default OfficeCanvasInner;
-
-// Re-export the wrapper for full-screen office page
-export function OfficeCanvasFullScreen({ agents, agentStates, ownerConfig, theme, onAgentClick }: OfficeCanvasWrapperProps) {
-  const { useOffice } = require('@/hooks/useOffice');
-  const { officeState, tick } = useOffice(agents, agentStates);
-  return (
-    <OfficeCanvasInner
-      officeState={officeState}
-      agents={agents}
-      owner={ownerConfig}
-      onTick={tick}
-      width={1200}
-      height={700}
     />
   );
 }

@@ -39,13 +39,16 @@ export default function MiniOffice({ agents, agentStates, ownerConfig, theme }: 
           className="relative rounded-xl overflow-hidden transition-all duration-300 group-hover:ring-2"
           style={{ border: '1px solid var(--border)' }}
         >
+          {/* Render at full resolution (1100x620) but display scaled down */}
           <OfficeCanvasInner
             officeState={officeState}
             agents={agents}
             owner={ownerConfig}
             onTick={tick}
-            width={600}
-            height={360}
+            width={1100}
+            height={620}
+            displayWidth={900}
+            displayHeight={510}
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-end justify-center pb-4">
             <span className="text-xs font-mono px-3 py-1 rounded-full" style={{ backgroundColor: 'var(--accent-primary)', color: '#000' }}>

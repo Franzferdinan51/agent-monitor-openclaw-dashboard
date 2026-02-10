@@ -1,58 +1,58 @@
 // ============================================================================
-// OpenClaw Gateway WebSocket Client
-// Connects to the OpenClaw Gateway to receive real-time agent state updates
+// Gateway Client — Polls /api/gateway for real OpenClaw session data
 // ============================================================================
 
 import type { AgentBehavior, AgentState, GatewayConfig } from './types';
 
 // ---------------------------------------------------------------------------
-// Gateway Response Types
+// Types from /api/gateway
 // ---------------------------------------------------------------------------
 
-interface GatewayHealth {
-  status?: string;
-  uptime?: number;
-  sessions?: GatewaySession[];
-  [key: string]: unknown;
+export interface GatewaySessionInfo {
+  id: string;
+  key: string;
+  name: string;
+  model: string;
+  totalTokens: number;
+  contextTokens: number;
+  channel: string;
+  behavior: string;
+  currentTask: string;
+  isActive: boolean;
+  isSubagent: boolean;
+  lastActivity: number;
+  updatedAt: number;
+  aborted: boolean;
 }
 
-interface GatewaySession {
-  id?: string;
-  agent?: string;
-  state?: string;
-  busy?: boolean;
-  [key: string]: unknown;
+export interface GatewayApiResponse {
+  ok: boolean;
+  timestamp: number;
+  count: number;
+  sessions: GatewaySessionInfo[];
+  error?: string;
 }
 
 export interface GatewayStatus {
   online: boolean;
+  sessions: GatewaySessionInfo[];
   agentStates: Record<string, AgentState>;
   agentBehaviors: Record<string, AgentBehavior>;
-  raw: unknown;
+  raw: GatewayApiResponse | null;
 }
 
 // ---------------------------------------------------------------------------
 // State Mapping
 // ---------------------------------------------------------------------------
 
-/** Map gateway session state → AgentBehavior */
-function mapToBehavior(session: GatewaySession): AgentBehavior {
-  const state = (session.state ?? '').toLowerCase();
-  const busy = session.busy ?? false;
-
-  if (state.includes('error') || state.includes('fail')) return 'panicking';
-  if (state.includes('crash')) return 'dead';
-  if (state.includes('restart') || state.includes('reviv')) return 'reviving';
-  if (state.includes('process') || state.includes('run') || state.includes('coding')) return 'coding';
-  if (state.includes('think') || state.includes('reason')) return 'thinking';
-  if (state.includes('search') || state.includes('research') || state.includes('fetch') || state.includes('brows')) return 'researching';
-  if (state.includes('deploy') || state.includes('exec')) return 'deploying';
-  if (state.includes('debug')) return 'debugging';
-  if (state.includes('meet') || state.includes('subagent')) return 'meeting';
-  if (state.includes('sleep') || state.includes('rest')) return 'sleeping';
-  if (state.includes('wait') || state.includes('idle')) return 'idle';
-
-  return busy ? 'coding' : 'idle';
+/** Map behavior string → AgentBehavior */
+function toBehavior(s: string): AgentBehavior {
+  const valid: AgentBehavior[] = [
+    'coding', 'thinking', 'researching', 'meeting', 'deploying', 'debugging',
+    'receiving_task', 'reporting', 'idle', 'coffee', 'snacking', 'toilet',
+    'sleeping', 'napping', 'panicking', 'dead', 'overloaded', 'reviving',
+  ];
+  return (valid.includes(s as AgentBehavior) ? s : 'idle') as AgentBehavior;
 }
 
 /** Map AgentBehavior → AgentState (for office engine) */
@@ -92,44 +92,37 @@ export function behaviorToOfficeState(behavior: AgentBehavior): AgentState {
 }
 
 // ---------------------------------------------------------------------------
-// HTTP Polling
+// HTTP Polling (to /api/gateway)
 // ---------------------------------------------------------------------------
 
-export async function pollGateway(gw: GatewayConfig): Promise<GatewayStatus> {
-  const baseUrl = gw.url.replace(/\/+$/, '');
-  const headers: Record<string, string> = { Accept: 'application/json' };
-  if (gw.token) headers['Authorization'] = `Bearer ${gw.token}`;
-
-  const endpoints = [
-    `${baseUrl}/health`,
-    `${baseUrl}/api/health`,
-    `${baseUrl}/status`,
-  ];
-
-  for (const url of endpoints) {
-    try {
-      const resp = await fetch(url, { headers, signal: AbortSignal.timeout(5000) });
-      if (!resp.ok) continue;
-      const data = (await resp.json()) as GatewayHealth;
-      const agentStates: Record<string, AgentState> = {};
-      const agentBehaviors: Record<string, AgentBehavior> = {};
-
-      if (Array.isArray(data.sessions)) {
-        for (const sess of data.sessions) {
-          const agentId = sess.agent ?? sess.id ?? 'main';
-          const behavior = mapToBehavior(sess);
-          agentBehaviors[agentId] = behavior;
-          agentStates[agentId] = behaviorToOfficeState(behavior);
-        }
-      }
-
-      return { online: true, agentStates, agentBehaviors, raw: data };
-    } catch {
-      continue;
+export async function pollGateway(_gw: GatewayConfig): Promise<GatewayStatus> {
+  try {
+    // Always poll our own Next.js API route
+    const resp = await fetch('/api/gateway', {
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!resp.ok) {
+      return { online: false, sessions: [], agentStates: {}, agentBehaviors: {}, raw: null };
     }
-  }
+    const data = (await resp.json()) as GatewayApiResponse;
 
-  return { online: false, agentStates: {}, agentBehaviors: {}, raw: null };
+    if (!data.ok) {
+      return { online: false, sessions: [], agentStates: {}, agentBehaviors: {}, raw: data };
+    }
+
+    const agentStates: Record<string, AgentState> = {};
+    const agentBehaviors: Record<string, AgentBehavior> = {};
+
+    for (const sess of data.sessions) {
+      const behavior = toBehavior(sess.behavior);
+      agentBehaviors[sess.id] = behavior;
+      agentStates[sess.id] = behaviorToOfficeState(behavior);
+    }
+
+    return { online: true, sessions: data.sessions, agentStates, agentBehaviors, raw: data };
+  } catch {
+    return { online: false, sessions: [], agentStates: {}, agentBehaviors: {}, raw: null };
+  }
 }
 
 // ---------------------------------------------------------------------------
