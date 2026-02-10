@@ -11,6 +11,7 @@ import type {
   ActivityEvent,
   SystemStats,
   AgentConfig,
+  AgentState,
 } from './types';
 
 // ---------------------------------------------------------------------------
@@ -22,28 +23,76 @@ export interface BehaviorInfo {
   emoji: string;
   category: 'work' | 'interaction' | 'life' | 'anomaly';
   color: string;
+  neonColor: string;
 }
 
 export const BEHAVIOR_INFO: Record<AgentBehavior, BehaviorInfo> = {
-  coding: { label: 'Coding', emoji: '💻', category: 'work', color: '#4CAF50' },
-  thinking: { label: 'Thinking', emoji: '🤔', category: 'work', color: '#FF9800' },
-  researching: { label: 'Researching', emoji: '📚', category: 'work', color: '#2196F3' },
-  meeting: { label: 'Meeting', emoji: '🤝', category: 'work', color: '#9C27B0' },
-  deploying: { label: 'Deploying', emoji: '🚀', category: 'work', color: '#00BCD4' },
-  debugging: { label: 'Debugging', emoji: '🐛', category: 'work', color: '#F44336' },
-  receiving_task: { label: 'Receiving Task', emoji: '📋', category: 'interaction', color: '#3F51B5' },
-  reporting: { label: 'Reporting', emoji: '✅', category: 'interaction', color: '#8BC34A' },
-  idle: { label: 'Idle', emoji: '☕', category: 'life', color: '#795548' },
-  coffee: { label: 'Coffee Break', emoji: '☕', category: 'life', color: '#795548' },
-  snacking: { label: 'Snacking', emoji: '🍪', category: 'life', color: '#FF9800' },
-  toilet: { label: 'Restroom', emoji: '🚽', category: 'life', color: '#607D8B' },
-  sleeping: { label: 'Sleeping', emoji: '😴', category: 'life', color: '#673AB7' },
-  napping: { label: 'Napping', emoji: '💤', category: 'life', color: '#9575CD' },
-  panicking: { label: 'Error!', emoji: '😱', category: 'anomaly', color: '#F44336' },
-  dead: { label: 'Crashed', emoji: '💀', category: 'anomaly', color: '#B71C1C' },
-  overloaded: { label: 'Overloaded', emoji: '🔥', category: 'anomaly', color: '#FF5722' },
-  reviving: { label: 'Restarting', emoji: '🔄', category: 'anomaly', color: '#FF9800' },
+  coding:         { label: 'Coding',         emoji: '💻', category: 'work',        color: '#4CAF50', neonColor: '#4FC3F7' },
+  thinking:       { label: 'Thinking',       emoji: '🤔', category: 'work',        color: '#FF9800', neonColor: '#FFCA28' },
+  researching:    { label: 'Researching',    emoji: '📚', category: 'work',        color: '#2196F3', neonColor: '#42A5F5' },
+  meeting:        { label: 'Meeting',        emoji: '🤝', category: 'work',        color: '#9C27B0', neonColor: '#AB47BC' },
+  deploying:      { label: 'Deploying',      emoji: '🚀', category: 'work',        color: '#00BCD4', neonColor: '#00E5FF' },
+  debugging:      { label: 'Debugging',      emoji: '🐛', category: 'work',        color: '#F44336', neonColor: '#FF5252' },
+  receiving_task: { label: 'Receiving Task', emoji: '📋', category: 'interaction', color: '#3F51B5', neonColor: '#536DFE' },
+  reporting:      { label: 'Reporting',      emoji: '✅', category: 'interaction', color: '#8BC34A', neonColor: '#76FF03' },
+  idle:           { label: 'Idle',           emoji: '☕', category: 'life',        color: '#795548', neonColor: '#FFCA28' },
+  coffee:         { label: 'Coffee Break',   emoji: '☕', category: 'life',        color: '#795548', neonColor: '#A1887F' },
+  snacking:       { label: 'Snacking',       emoji: '🍪', category: 'life',        color: '#FF9800', neonColor: '#FFD740' },
+  toilet:         { label: 'Restroom',       emoji: '🚽', category: 'life',        color: '#607D8B', neonColor: '#90A4AE' },
+  sleeping:       { label: 'Sleeping',       emoji: '😴', category: 'life',        color: '#673AB7', neonColor: '#AB47BC' },
+  napping:        { label: 'Napping',        emoji: '💤', category: 'life',        color: '#9575CD', neonColor: '#B388FF' },
+  panicking:      { label: 'Error!',         emoji: '😱', category: 'anomaly',     color: '#F44336', neonColor: '#FF1744' },
+  dead:           { label: 'Crashed',        emoji: '💀', category: 'anomaly',     color: '#B71C1C', neonColor: '#D50000' },
+  overloaded:     { label: 'Overloaded',     emoji: '🔥', category: 'anomaly',     color: '#FF5722', neonColor: '#FF3D00' },
+  reviving:       { label: 'Restarting',     emoji: '🔄', category: 'anomaly',     color: '#FF9800', neonColor: '#FFAB00' },
 };
+
+/** Check if a behavior is a "working" state */
+export function isWorkingBehavior(behavior: AgentBehavior): boolean {
+  return BEHAVIOR_INFO[behavior].category === 'work';
+}
+
+/** Check if a behavior is an "active" state (working or interacting) */
+export function isActiveBehavior(behavior: AgentBehavior): boolean {
+  const cat = BEHAVIOR_INFO[behavior].category;
+  return cat === 'work' || cat === 'interaction';
+}
+
+/** Map behavior → simplified office state */
+export function behaviorToOfficeState(behavior: AgentBehavior): AgentState {
+  switch (behavior) {
+    case 'coding':
+    case 'debugging':
+      return 'coding';
+    case 'thinking':
+      return 'thinking';
+    case 'researching':
+      return 'researching';
+    case 'meeting':
+      return 'meeting';
+    case 'deploying':
+      return 'deploying';
+    case 'receiving_task':
+      return 'receiving_task';
+    case 'reporting':
+      return 'reporting';
+    case 'sleeping':
+    case 'napping':
+      return 'resting';
+    case 'idle':
+    case 'coffee':
+    case 'snacking':
+    case 'toilet':
+      return 'idle';
+    case 'panicking':
+    case 'dead':
+    case 'overloaded':
+    case 'reviving':
+      return 'waiting';
+    default:
+      return 'idle';
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Demo mode data generation
@@ -65,6 +114,10 @@ const DEMO_TASKS: string[] = [
   'Refactor payment module',
   'Set up CI/CD pipeline',
   'Analyze user feedback data',
+  'Build dashboard UI',
+  'Migrate to TypeScript strict mode',
+  'Add rate limiting middleware',
+  'Design REST API endpoints',
 ];
 
 let demoEventId = 0;
@@ -80,20 +133,20 @@ export function generateDemoAgentState(agentId: string): AgentDashboardState {
 
   const tokenUsage: TokenUsage[] = [];
   for (let i = 23; i >= 0; i--) {
+    const input = Math.floor(Math.random() * 5000) + 500;
+    const output = Math.floor(Math.random() * 3000) + 200;
     tokenUsage.push({
       timestamp: now - i * 3600000,
-      input: Math.floor(Math.random() * 5000) + 500,
-      output: Math.floor(Math.random() * 3000) + 200,
-      total: 0,
+      input,
+      output,
+      total: input + output,
     });
-    tokenUsage[tokenUsage.length - 1].total =
-      tokenUsage[tokenUsage.length - 1].input + tokenUsage[tokenUsage.length - 1].output;
   }
 
   const totalTokens = tokenUsage.reduce((sum, t) => sum + t.total, 0);
   const totalTasks = Math.floor(Math.random() * 20) + 5;
 
-  const currentTask: AgentTask | null = ['coding', 'debugging', 'deploying', 'researching', 'thinking'].includes(behavior)
+  const currentTask: AgentTask | null = isWorkingBehavior(behavior)
     ? {
         id: `task-${agentId}-${Date.now()}`,
         title: DEMO_TASKS[Math.floor(Math.random() * DEMO_TASKS.length)],
@@ -113,7 +166,7 @@ export function generateDemoAgentState(agentId: string): AgentDashboardState {
 
   return {
     behavior,
-    officeState: behaviorToSimpleState(behavior),
+    officeState: behavior,
     currentTask,
     taskHistory,
     tokenUsage,
@@ -123,10 +176,6 @@ export function generateDemoAgentState(agentId: string): AgentDashboardState {
     sessionLog: generateDemoLogs(agentId),
     uptime: Math.floor(Math.random() * 86400000),
   };
-}
-
-function behaviorToSimpleState(behavior: AgentBehavior): AgentBehavior {
-  return behavior;
 }
 
 function generateDemoLogs(agentId: string): string[] {
@@ -142,6 +191,9 @@ function generateDemoLogs(agentId: string): string[] {
       `[${ts}] Idle — waiting for new messages`,
       `[${ts}] Connected to gateway`,
       `[${ts}] Session heartbeat OK`,
+      `[${ts}] Executing: npm run build`,
+      `[${ts}] Reading file: src/app/page.tsx`,
+      `[${ts}] Writing 2,456 bytes to output`,
     ];
     return messages[i % messages.length];
   }).reverse();
@@ -149,12 +201,24 @@ function generateDemoLogs(agentId: string): string[] {
 
 /** Generate a demo activity event */
 export function generateDemoEvent(agents: AgentConfig[]): ActivityEvent {
+  if (agents.length === 0) {
+    return {
+      id: `event-${++demoEventId}`,
+      agentId: 'system',
+      agentName: 'System',
+      agentEmoji: '🖥️',
+      type: 'system',
+      message: 'System health check OK',
+      timestamp: Date.now(),
+    };
+  }
+
   const agent = agents[Math.floor(Math.random() * agents.length)];
   const types: ActivityEvent['type'][] = ['state_change', 'task_start', 'task_complete', 'tool_call', 'message'];
   const type = types[Math.floor(Math.random() * types.length)];
 
   const messages: Record<ActivityEvent['type'], string[]> = {
-    state_change: ['Started coding', 'Now thinking...', 'Taking a coffee break', 'Deploying to production', 'Back to idle'],
+    state_change: ['Started coding', 'Now thinking...', 'Taking a coffee break', 'Deploying to production', 'Back to idle', 'Entering meeting room'],
     task_start: ['New task: ' + DEMO_TASKS[Math.floor(Math.random() * DEMO_TASKS.length)]],
     task_complete: ['Completed: ' + DEMO_TASKS[Math.floor(Math.random() * DEMO_TASKS.length)]],
     task_fail: ['Failed: Connection timeout', 'Failed: Rate limit exceeded'],
@@ -179,7 +243,7 @@ export function generateDemoEvent(agents: AgentConfig[]): ActivityEvent {
 
 /** Generate demo system stats */
 export function generateDemoStats(agents: AgentConfig[]): SystemStats {
-  const activeCount = Math.floor(Math.random() * agents.length) + 1;
+  const activeCount = Math.max(1, Math.floor(Math.random() * agents.length) + 1);
   return {
     totalAgents: agents.length,
     activeAgents: Math.min(activeCount, agents.length),
@@ -190,4 +254,29 @@ export function generateDemoStats(agents: AgentConfig[]): SystemStats {
     uptime: Math.floor(Math.random() * 86400),
     connected: false,
   };
+}
+
+/** Format token count for display */
+export function formatTokens(n: number): string {
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
+  return n.toString();
+}
+
+/** Format uptime seconds to human-readable */
+export function formatUptime(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+/** Format relative time */
+export function formatRelativeTime(timestamp: number): string {
+  const diff = Date.now() - timestamp;
+  if (diff < 1000) return 'just now';
+  if (diff < 60000) return `${Math.floor(diff / 1000)}s ago`;
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+  return `${Math.floor(diff / 86400000)}d ago`;
 }
