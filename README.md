@@ -1,36 +1,104 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 🏢 AgentMonitor
 
-## Getting Started
+Real-time AI agent visualization and monitoring dashboard for [OpenClaw](https://github.com/openclaw/openclaw).
 
-First, run the development server:
+Watch your AI agents work in a pixel-art office, monitor their status, chat with them, and customize everything.
+
+## ✨ Features
+
+### 🖥️ Dashboard
+- **Agent Cards** — Real-time status, token usage, current task for each agent
+- **System Stats** — Total agents, active count, token usage, uptime
+- **Activity Feed** — Live event stream across all agents
+- **Mini Office** — Preview of the pixel office on the dashboard
+
+### 🏢 Office View
+- **Pixel Art Office** — Isometric office with furniture, zones, and decorations
+- **Agent Behaviors** — Agents walk between zones based on their real status
+  - `coding` → desk (typing), `thinking` → whiteboard, `meeting` → meeting room
+  - `sleeping` → lounge (zzZ), `coffee` → break room, `toilet` → bathroom
+  - `dead` → collapsed (crash), `panicking` → running around (error)
+  - `overloaded` → smoking head (context full), `reviving` → sparkle (restart)
+- **Day/Night Cycle** — Ambient lighting changes
+- **Particles & Bubbles** — Visual effects for different states
+
+### 💬 Chat
+- Click any agent to open a chat window
+- Send messages directly to agents (via OpenClaw Gateway)
+- Demo mode simulates responses
+
+### 🎨 Customization
+- **4 Themes** — Midnight (default), Void (dark), Warm (cozy), Neon (cyberpunk)
+- **Agent Avatars** — glasses, hoodie, suit, casual, robot, cat, dog
+- **Agent Colors** — 6 preset colors per agent
+- **Settings Panel** — Gateway config, agent management, theme selection
+
+### ⚙️ Architecture
+- **Config-driven** — Everything stored in localStorage, supports URL params
+- **Demo Mode** — Works without OpenClaw Gateway connection
+- **Gateway Polling** — HTTP polling for agent status (WebSocket planned)
+- **Cross-platform** — Pure web tech, no native dependencies
+
+## 🚀 Quick Start
 
 ```bash
+# Clone and install
+cd agent-monitor
+npm install
+
+# Run development server
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+
+# Open http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## 🔌 OpenClaw Integration
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Connect to your OpenClaw Gateway:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. Open Settings (⚙️)
+2. Enter Gateway URL (default: `http://localhost:18789`)
+3. Enter Auth Token (if configured)
+4. Toggle off Demo Mode
 
-## Learn More
+Or use URL params:
+```
+http://localhost:3000?gateway=http://localhost:18789&token=YOUR_TOKEN
+```
 
-To learn more about Next.js, take a look at the following resources:
+## 🗺️ Roadmap
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- [ ] **Phase 2** — WebSocket real-time updates (replace HTTP polling)
+- [ ] **Phase 3** — Cloudflare Tunnel for external access
+- [ ] **Phase 4** — OpenClaw Plugin (`openclaw plugins install @openclaw/agent-monitor`)
+- [ ] **Phase 5** — npm package (`npx agent-monitor`)
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## 🛠️ Tech Stack
 
-## Deploy on Vercel
+- **Next.js 16** (App Router) + TypeScript
+- **HTML5 Canvas** — Pixel art rendering engine
+- **Tailwind CSS** — Styling with CSS variable theming
+- **OpenClaw Gateway** — Agent status via HTTP/WebSocket
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## 📁 Project Structure
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```
+src/
+├── app/                    # Pages (dashboard, office, agent detail)
+├── components/
+│   ├── dashboard/          # AgentCard, AgentGrid, ActivityFeed, SystemStats, Navbar
+│   ├── office/             # OfficeCanvas, MiniOffice, OfficeControls
+│   ├── agent/              # AgentDetail, TokenUsage, SessionLog, TaskList
+│   ├── chat/               # ChatWindow
+│   ├── settings/           # SettingsPanel (Gateway, Agents, Theme)
+│   └── shared/             # StatusBadge, ConnectionStatus
+├── engine/                 # Isometric rendering, pathfinding, animation
+├── sprites/                # Character, furniture, decoration, effect renderers
+├── office/                 # Layout, zones, behavior mapping
+├── hooks/                  # useGateway, useAgents, useOffice
+└── lib/                    # Types, config, gateway client, state mapper
+```
+
+## 📄 License
+
+MIT
