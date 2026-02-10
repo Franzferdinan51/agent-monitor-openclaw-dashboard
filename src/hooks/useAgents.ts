@@ -305,27 +305,13 @@ export function useAgents(forceDemoMode = false): UseAgentsReturn {
     }
   }, [sessionKeys, agents, pollGateway]);
 
-  // Poll chat history for the agent's reply after sending a message
-  const pollForReply = useCallback(async (agentId: string, key: string, _sentTimestamp: number) => {
-    const maxAttempts = 60; // Up to 2 min (60 × 2s)
-    const pollInterval = 2000;
+  // Track message counts per agent to detect new replies
+  const msgCountRef = useRef<Record<string, number>>({});
 
-    // First, get the current message count so we know when a new one appears
-    let baselineAssistantCount = 0;
-    try {
-      const baseResp = await fetch('/api/gateway/action', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'history', sessionKey: key, limit: 50 }),
-      });
-      const baseData = await baseResp.json();
-      if (baseData.ok && baseData.result?.messages) {
-        baselineAssistantCount = (baseData.result.messages as Array<{ role: string }>)
-          .filter(m => m.role === 'assistant').length;
-      }
-    } catch {
-      // If we can't get baseline, just use 0 — will match first assistant msg
-    }
+  // Poll chat history for the agent's reply after sending a message
+  const pollForReply = useCallback(async (agentId: string, key: string) => {
+    const maxAttempts = 90; // Up to 90s (90 × 1s)
+    const pollInterval = 1000;
 
     // Add a "thinking" indicator
     const thinkingId = `msg-${Date.now()}-thinking`;
@@ -340,14 +326,23 @@ export function useAgents(forceDemoMode = false): UseAgentsReturn {
       }],
     }));
 
+    // Use the gateway poll data (already polling every 5s) to detect when agent finishes
+    // Then fetch history only once
+    const baselineCount = msgCountRef.current[agentId] ?? 0;
+
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       await new Promise(r => setTimeout(r, pollInterval));
+
+      // Check if the agent's behavior changed from active to idle-ish (via existing poll)
+      // But mainly just try to fetch history and check for new assistant messages
+      // Only check every 3 attempts (every 3s) to reduce WS connection overhead
+      if (attempt % 3 !== 0) continue;
 
       try {
         const resp = await fetch('/api/gateway/action', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'history', sessionKey: key, limit: 50 }),
+          body: JSON.stringify({ action: 'history', sessionKey: key, limit: 5 }),
         });
         const data = await resp.json();
 
@@ -357,13 +352,14 @@ export function useAgents(forceDemoMode = false): UseAgentsReturn {
             content?: string | Array<{ type: string; text?: string }>;
           }>;
 
-          const assistantMessages = messages.filter(m => m.role === 'assistant');
+          const assistantCount = messages.filter(m => m.role === 'assistant').length;
 
-          // Check if we have a NEW assistant message (count increased)
-          if (assistantMessages.length > baselineAssistantCount) {
-            const lastAssistant = assistantMessages[assistantMessages.length - 1];
-            
-            // Extract text from content (can be string or content blocks array)
+          // If we have more assistant messages than baseline, we got a reply
+          if (assistantCount > baselineCount) {
+            // Get the last assistant message
+            const assistantMsgs = messages.filter(m => m.role === 'assistant');
+            const lastAssistant = assistantMsgs[assistantMsgs.length - 1];
+
             let content = '';
             if (typeof lastAssistant.content === 'string') {
               content = lastAssistant.content;
@@ -375,12 +371,13 @@ export function useAgents(forceDemoMode = false): UseAgentsReturn {
             }
 
             if (content) {
-              // Truncate very long responses for chat display
-              const displayContent = content.length > 2000 
+              const displayContent = content.length > 2000
                 ? content.slice(0, 2000) + '\n\n…(truncated)'
                 : content;
 
-              // Replace the thinking indicator with the actual reply
+              // Update baseline
+              msgCountRef.current[agentId] = assistantCount;
+
               setChatMessages(prev => ({
                 ...prev,
                 [agentId]: (prev[agentId] || []).map(m =>
@@ -398,7 +395,7 @@ export function useAgents(forceDemoMode = false): UseAgentsReturn {
       }
     }
 
-    // Timeout — replace thinking with timeout message
+    // Timeout
     setChatMessages(prev => ({
       ...prev,
       [agentId]: (prev[agentId] || []).map(m =>
@@ -440,15 +437,28 @@ export function useAgents(forceDemoMode = false): UseAgentsReturn {
       // Real mode: send via gateway, then poll for reply
       const key = sessionKeys[agentId];
       if (key) {
-        const sentAt = Date.now();
+        // First, snapshot the current assistant message count before sending
         fetch('/api/gateway/action', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'send', sessionKey: key, message }),
+          body: JSON.stringify({ action: 'history', sessionKey: key, limit: 200 }),
+        }).then(r => r.json()).then(baseData => {
+          // Set baseline from current history
+          if (baseData.ok && baseData.result?.messages) {
+            const count = (baseData.result.messages as Array<{ role: string }>)
+              .filter(m => m.role === 'assistant').length;
+            msgCountRef.current[agentId] = count;
+          }
+          // Now send the message
+          return fetch('/api/gateway/action', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'send', sessionKey: key, message }),
+          });
         }).then(resp => resp.json()).then(data => {
           if (data.ok) {
             // Start polling for the agent's actual reply
-            pollForReply(agentId, key, sentAt);
+            pollForReply(agentId, key);
           } else {
             setChatMessages(prev => ({
               ...prev,
