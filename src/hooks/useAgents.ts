@@ -1,6 +1,7 @@
 // ============================================================================
 // useAgents — Agent state management hook
-// Polls /api/gateway for real OpenClaw session data
+// Uses SSE (EventSource) for real-time state updates from the gateway,
+// with an initial fetch + slow periodic refetch for metadata (tokens, etc.)
 // Falls back to demo mode if gateway is unreachable
 // ============================================================================
 
@@ -45,10 +46,11 @@ export interface UseAgentsReturn {
   sendChat: (agentId: string, message: string) => void;
   setBehavior: (agentId: string, behavior: AgentBehavior) => void;
   restartSession: (agentId: string) => Promise<void>;
+  loadChatHistory: (agentId: string) => Promise<void>;
 }
 
 const DEMO_BEHAVIORS: AgentBehavior[] = [
-  'coding', 'thinking', 'researching', 'meeting', 'deploying',
+  'working', 'thinking', 'researching', 'meeting', 'deploying',
   'debugging', 'idle', 'coffee', 'sleeping', 'receiving_task',
   'reporting', 'snacking',
 ];
@@ -72,12 +74,11 @@ const AGENT_COLORS = ['#4FC3F7', '#66BB6A', '#FFCA28', '#AB47BC', '#EF5350', '#F
 const AGENT_EMOJIS = ['⚡', '🔥', '🌟', '🎯', '🚀', '🧠'];
 
 function sessionToAgentConfig(sess: GatewaySessionInfo, index: number): AgentConfig {
-  // Main session gets special treatment
   const isMain = !sess.isSubagent;
   return {
     id: sess.id,
-    name: isMain ? 'Lipo' : sess.name,
-    emoji: isMain ? '⚡' : AGENT_EMOJIS[(index) % AGENT_EMOJIS.length],
+    name: sess.name,
+    emoji: sess.emoji ?? (isMain ? '⚡' : AGENT_EMOJIS[(index) % AGENT_EMOJIS.length]),
     color: isMain ? '#4FC3F7' : AGENT_COLORS[(index) % AGENT_COLORS.length],
     avatar: isMain ? 'glasses' : AGENT_AVATARS[(index) % AGENT_AVATARS.length],
   };
@@ -121,14 +122,23 @@ export function useAgents(forceDemoMode = false): UseAgentsReturn {
   const [systemStats, setSystemStats] = useState<SystemStats>(() => generateDemoStats(DEMO_AGENTS));
   const [chatMessages, setChatMessages] = useState<Record<string, ChatMessage[]>>({});
   const [sessionKeys, setSessionKeys] = useState<Record<string, string>>({});
-  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Refs for cleanup and tracking
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const metadataTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const demoTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const feedTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const prevBehaviorsRef = useRef<Record<string, string>>({});
+  /** Monotonic counter for unique activity feed event IDs. */
+  const eventIdRef = useRef(0);
+  /** Maps session key → session id (for patching state by key) */
+  const keyToIdRef = useRef<Record<string, string>>({});
 
-  // Poll /api/gateway for real data
-  const pollGateway = useCallback(async () => {
-    if (forceDemoMode) return;
+  // ------------------------------------------------------------------
+  // Fetch full session data from /api/gateway (metadata + current state)
+  // ------------------------------------------------------------------
+  const fetchSessions = useCallback(async (): Promise<boolean> => {
+    if (forceDemoMode) return false;
 
     try {
       const resp = await fetch('/api/gateway', { signal: AbortSignal.timeout(10000) });
@@ -136,9 +146,7 @@ export function useAgents(forceDemoMode = false): UseAgentsReturn {
       const data = (await resp.json()) as GatewayApiResponse;
 
       if (!data.ok || !data.sessions?.length) {
-        setConnected(false);
-        setDemoMode(true);
-        return;
+        return false;
       }
 
       setConnected(true);
@@ -148,12 +156,15 @@ export function useAgents(forceDemoMode = false): UseAgentsReturn {
       const newAgents = data.sessions.map((sess, i) => sessionToAgentConfig(sess, i));
       setAgents(newAgents);
 
-      // Build session key map (sessionId → sessionKey)
+      // Build session key map (sessionId → sessionKey) + reverse map
       const newKeys: Record<string, string> = {};
+      const newKeyToId: Record<string, string> = {};
       for (const sess of data.sessions) {
         newKeys[sess.id] = sess.key;
+        newKeyToId[sess.key] = sess.id;
       }
       setSessionKeys(newKeys);
+      keyToIdRef.current = newKeyToId;
 
       // Build dashboard states
       const newStates: Record<string, AgentDashboardState> = {};
@@ -170,7 +181,7 @@ export function useAgents(forceDemoMode = false): UseAgentsReturn {
           const agent = newAgents.find(a => a.id === sess.id);
           if (agent && info) {
             const event: ActivityEvent = {
-              id: `gw-${Date.now()}-${sess.id}`,
+              id: `gw-${Date.now()}-${++eventIdRef.current}-${sess.id}`,
               agentId: sess.id,
               agentName: agent.name,
               agentEmoji: agent.emoji,
@@ -184,7 +195,7 @@ export function useAgents(forceDemoMode = false): UseAgentsReturn {
         prevBehaviorsRef.current[sess.id] = sess.behavior;
       }
 
-      // System stats — only real data from gateway
+      // System stats
       setSystemStats({
         totalAgents: data.sessions.length,
         activeAgents: data.sessions.filter(s => s.isActive).length,
@@ -196,20 +207,128 @@ export function useAgents(forceDemoMode = false): UseAgentsReturn {
         connected: true,
       });
 
+      return true;
     } catch {
-      setConnected(false);
-      setDemoMode(true);
+      return false;
     }
   }, [forceDemoMode]);
 
-  // Start polling
+  // ------------------------------------------------------------------
+  // SSE: connect to /api/gateway/events for real-time state patches
+  // ------------------------------------------------------------------
   useEffect(() => {
-    pollGateway();
-    pollTimerRef.current = setInterval(pollGateway, 5000);
+    if (forceDemoMode) return;
+
+    let cancelled = false;
+
+    async function init() {
+      // Initial fetch to populate sessions
+      const ok = await fetchSessions();
+      if (cancelled) return;
+
+      if (!ok) {
+        setConnected(false);
+        setDemoMode(true);
+        return;
+      }
+
+      // Open SSE connection for real-time state updates
+      const es = new EventSource('/api/gateway/events');
+      eventSourceRef.current = es;
+
+      es.addEventListener('state', (evt) => {
+        try {
+          const data = JSON.parse(evt.data) as {
+            sessionKey: string;
+            chatStatus: string | null;
+            agentStatus: string | null;
+            agentEventData: Record<string, unknown> | null;
+            behavior: string;
+            agentName: string | null;
+            emoji: string | null;
+            lastRunId: string | null;
+          };
+
+          const sessionId = keyToIdRef.current[data.sessionKey];
+          if (!sessionId) return; // unknown session — will appear on next metadata refresh
+
+          const behavior = (data.behavior ?? 'idle') as AgentBehavior;
+
+          // Patch the dashboard state for this specific session
+          setAgentStates(prev => {
+            const existing = prev[sessionId];
+            if (!existing) return prev;
+            return {
+              ...prev,
+              [sessionId]: {
+                ...existing,
+                behavior,
+                officeState: behaviorToOfficeState(behavior),
+                lastActivity: Date.now(),
+              },
+            };
+          });
+
+          // Detect behavior change → activity feed
+          const prevBehavior = prevBehaviorsRef.current[sessionId];
+          if (prevBehavior && prevBehavior !== behavior) {
+            const info = BEHAVIOR_INFO[behavior];
+            if (info) {
+              setAgents(currentAgents => {
+                const agent = currentAgents.find(a => a.id === sessionId);
+                if (agent) {
+                  const event: ActivityEvent = {
+                    id: `sse-${Date.now()}-${++eventIdRef.current}-${sessionId}`,
+                    agentId: sessionId,
+                    agentName: agent.name,
+                    agentEmoji: agent.emoji,
+                    type: 'state_change',
+                    message: `${info.emoji} ${info.label}`,
+                    timestamp: Date.now(),
+                  };
+                  setActivityFeed(prev => [event, ...prev].slice(0, 50));
+                }
+                return currentAgents; // no change to agents array
+              });
+            }
+          }
+          prevBehaviorsRef.current[sessionId] = behavior;
+
+        } catch {
+          // Ignore malformed events
+        }
+      });
+
+      es.addEventListener('open', () => {
+        // SSE connection established
+      });
+
+      es.onerror = () => {
+        // EventSource will auto-reconnect. If the server is gone for a while,
+        // fall back to demo mode. We'll recover on the next successful reconnect.
+        // Don't immediately set demo mode — give it a chance to reconnect.
+      };
+
+      // Slow metadata refresh every 30s (token counts, new sessions, etc.)
+      metadataTimerRef.current = setInterval(() => {
+        fetchSessions();
+      }, 30_000);
+    }
+
+    init();
+
     return () => {
-      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+      cancelled = true;
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+        eventSourceRef.current = null;
+      }
+      if (metadataTimerRef.current) {
+        clearInterval(metadataTimerRef.current);
+        metadataTimerRef.current = null;
+      }
     };
-  }, [pollGateway]);
+  }, [forceDemoMode, fetchSessions]);
 
   // Demo mode: random behavior changes
   useEffect(() => {
@@ -288,7 +407,7 @@ export function useAgents(forceDemoMode = false): UseAgentsReturn {
       const agent = agents.find(a => a.id === agentId);
       if (agent) {
         setActivityFeed(prev => [{
-          id: `restart-${Date.now()}`,
+          id: `restart-${Date.now()}-${++eventIdRef.current}`,
           agentId,
           agentName: agent.name,
           agentEmoji: agent.emoji,
@@ -298,15 +417,14 @@ export function useAgents(forceDemoMode = false): UseAgentsReturn {
         }, ...prev].slice(0, 50));
       }
 
-      // Force immediate re-poll
-      setTimeout(() => pollGateway(), 1000);
+      // Force immediate re-fetch
+      setTimeout(() => fetchSessions(), 1000);
     } catch (err) {
       console.error('Restart failed:', err);
     }
-  }, [sessionKeys, agents, pollGateway]);
+  }, [sessionKeys, agents, fetchSessions]);
 
-  // Track message counts per agent to detect new replies
-  const msgCountRef = useRef<Record<string, number>>({});
+
 
   // Poll chat history for the agent's reply after sending a message
   const pollForReply = useCallback(async (agentId: string, key: string) => {
@@ -326,23 +444,17 @@ export function useAgents(forceDemoMode = false): UseAgentsReturn {
       }],
     }));
 
-    // Use the gateway poll data (already polling every 5s) to detect when agent finishes
-    // Then fetch history only once
-    const baselineCount = msgCountRef.current[agentId] ?? 0;
-
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       await new Promise(r => setTimeout(r, pollInterval));
 
-      // Check if the agent's behavior changed from active to idle-ish (via existing poll)
-      // But mainly just try to fetch history and check for new assistant messages
-      // Only check every 3 attempts (every 3s) to reduce WS connection overhead
+      // Only check every 3 attempts (every 3s) to reduce overhead
       if (attempt % 3 !== 0) continue;
 
       try {
         const resp = await fetch('/api/gateway/action', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'history', sessionKey: key, limit: 5 }),
+          body: JSON.stringify({ action: 'history', sessionKey: key, limit: 10 }),
         });
         const data = await resp.json();
 
@@ -352,42 +464,35 @@ export function useAgents(forceDemoMode = false): UseAgentsReturn {
             content?: string | Array<{ type: string; text?: string }>;
           }>;
 
-          const assistantCount = messages.filter(m => m.role === 'assistant').length;
+          // Check if the last message is an assistant reply
+          // (after we sent a user message, the last message will be 'user' until the agent replies)
+          const lastMsg = messages[messages.length - 1];
+          if (!lastMsg || lastMsg.role !== 'assistant') continue;
 
-          // If we have more assistant messages than baseline, we got a reply
-          if (assistantCount > baselineCount) {
-            // Get the last assistant message
-            const assistantMsgs = messages.filter(m => m.role === 'assistant');
-            const lastAssistant = assistantMsgs[assistantMsgs.length - 1];
+          let content = '';
+          if (typeof lastMsg.content === 'string') {
+            content = lastMsg.content;
+          } else if (Array.isArray(lastMsg.content)) {
+            content = lastMsg.content
+              .filter((b) => b.type === 'text' && b.text)
+              .map((b) => b.text)
+              .join('\n');
+          }
 
-            let content = '';
-            if (typeof lastAssistant.content === 'string') {
-              content = lastAssistant.content;
-            } else if (Array.isArray(lastAssistant.content)) {
-              content = lastAssistant.content
-                .filter((b) => b.type === 'text' && b.text)
-                .map((b) => b.text)
-                .join('\n');
-            }
+          if (content) {
+            const displayContent = content.length > 2000
+              ? content.slice(0, 2000) + '\n\n…(truncated)'
+              : content;
 
-            if (content) {
-              const displayContent = content.length > 2000
-                ? content.slice(0, 2000) + '\n\n…(truncated)'
-                : content;
-
-              // Update baseline
-              msgCountRef.current[agentId] = assistantCount;
-
-              setChatMessages(prev => ({
-                ...prev,
-                [agentId]: (prev[agentId] || []).map(m =>
-                  m.id === thinkingId
-                    ? { ...m, id: `msg-${Date.now()}-agent`, content: displayContent, timestamp: Date.now() }
-                    : m
-                ),
-              }));
-              return;
-            }
+            setChatMessages(prev => ({
+              ...prev,
+              [agentId]: (prev[agentId] || []).map(m =>
+                m.id === thinkingId
+                  ? { ...m, id: `msg-${Date.now()}-agent`, content: displayContent, timestamp: Date.now() }
+                  : m
+              ),
+            }));
+            return;
           }
         }
       } catch {
@@ -405,6 +510,77 @@ export function useAgents(forceDemoMode = false): UseAgentsReturn {
       ),
     }));
   }, []);
+
+  const loadChatHistory = useCallback(async (agentId: string) => {
+    const key = sessionKeys[agentId];
+    if (!key) return;
+
+    try {
+      const resp = await fetch('/api/gateway/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'history', sessionKey: key, limit: 50 }),
+      });
+      const data = await resp.json();
+
+      if (!data.ok || !data.result?.messages) return;
+
+      const rawMessages = data.result.messages as Array<{
+        role: string;
+        content?: string | Array<{ type: string; text?: string }>;
+      }>;
+
+      const converted: ChatMessage[] = [];
+
+      for (const msg of rawMessages) {
+        // Skip system messages
+        if (msg.role === 'system') continue;
+
+        // Map assistant → agent
+        const role: 'user' | 'agent' = msg.role === 'assistant' ? 'agent' : 'user';
+
+        // Extract text content (string or array of content blocks)
+        let content = '';
+        if (typeof msg.content === 'string') {
+          content = msg.content;
+        } else if (Array.isArray(msg.content)) {
+          content = msg.content
+            .filter((b) => b.type === 'text' && b.text)
+            .map((b) => b.text)
+            .join('\n');
+        }
+
+        if (!content) continue;
+
+        // Truncate very long messages for display
+        const displayContent = content.length > 2000
+          ? content.slice(0, 2000) + '\n\n...(truncated)'
+          : content;
+
+        converted.push({
+          id: `history-${converted.length}`,
+          agentId,
+          role,
+          content: displayContent,
+          timestamp: Date.now() - (rawMessages.length - converted.length) * 1000, // approximate ordering
+        });
+      }
+
+
+      setChatMessages(prev => {
+        const existing = prev[agentId] || [];
+        if (existing.length > 0) {
+          // User sent messages while history was loading — prepend history, keep local-only messages
+          const historyContents = new Set(converted.map(m => m.content));
+          const localOnly = existing.filter(m => !historyContents.has(m.content));
+          return { ...prev, [agentId]: [...converted, ...localOnly] };
+        }
+        return { ...prev, [agentId]: converted };
+      });
+    } catch {
+      // Silently fail — user just won't see history
+    }
+  }, [sessionKeys]);
 
   const sendChat = useCallback((agentId: string, message: string) => {
     const userMsg: ChatMessage = {
@@ -437,27 +613,12 @@ export function useAgents(forceDemoMode = false): UseAgentsReturn {
       // Real mode: send via gateway, then poll for reply
       const key = sessionKeys[agentId];
       if (key) {
-        // First, snapshot the current assistant message count before sending
         fetch('/api/gateway/action', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'history', sessionKey: key, limit: 200 }),
-        }).then(r => r.json()).then(baseData => {
-          // Set baseline from current history
-          if (baseData.ok && baseData.result?.messages) {
-            const count = (baseData.result.messages as Array<{ role: string }>)
-              .filter(m => m.role === 'assistant').length;
-            msgCountRef.current[agentId] = count;
-          }
-          // Now send the message
-          return fetch('/api/gateway/action', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'send', sessionKey: key, message }),
-          });
+          body: JSON.stringify({ action: 'send', sessionKey: key, message }),
         }).then(resp => resp.json()).then(data => {
           if (data.ok) {
-            // Start polling for the agent's actual reply
             pollForReply(agentId, key);
           } else {
             setChatMessages(prev => ({
@@ -499,5 +660,6 @@ export function useAgents(forceDemoMode = false): UseAgentsReturn {
     sendChat,
     setBehavior,
     restartSession,
+    loadChatHistory,
   };
 }

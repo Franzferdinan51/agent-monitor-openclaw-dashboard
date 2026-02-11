@@ -18,6 +18,20 @@ import { spawn, type ChildProcess } from "child_process";
 import { join, dirname } from "path";
 import { existsSync, cpSync } from "fs";
 import { fileURLToPath } from "url";
+import type {
+  OpenClawPluginApi,
+  GatewayRequestHandlerOptions,
+} from "openclaw/plugin-sdk";
+
+/** Mirrors openclaw's OpenClawPluginDefinition (not re-exported from plugin-sdk). */
+type OpenClawPluginDefinition = {
+  id?: string;
+  name?: string;
+  description?: string;
+  version?: string;
+  register?: (api: OpenClawPluginApi) => void | Promise<void>;
+  activate?: (api: OpenClawPluginApi) => void | Promise<void>;
+};
 
 interface AgentMonitorConfig {
   enabled?: boolean;
@@ -37,14 +51,13 @@ function resolveConfig(raw: unknown): AgentMonitorConfig {
   };
 }
 
-const agentMonitorPlugin = {
+const agentMonitorPlugin: OpenClawPluginDefinition = {
   id: "agent-monitor",
   name: "Agent Monitor",
   description:
     "Real-time AI agent visualization & monitoring dashboard with pixel-art office",
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  register(api: any) {
+  register(api: OpenClawPluginApi) {
     const config = resolveConfig(api.pluginConfig);
 
     let serverProcess: ChildProcess | null = null;
@@ -183,8 +196,7 @@ const agentMonitorPlugin = {
 
     // Register a CLI command for quick access
     api.registerCli(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ({ program }: any) => {
+      ({ program }) => {
         program
           .command("monitor")
           .description("Agent Monitor dashboard")
@@ -212,7 +224,7 @@ const agentMonitorPlugin = {
     // Register a gateway RPC method to check monitor status
     api.registerGatewayMethod(
       "monitor.status",
-      ({ respond }: { respond: (ok: boolean, payload?: unknown) => void }) => {
+      ({ respond }: GatewayRequestHandlerOptions) => {
         respond(true, {
           running: serverProcess !== null,
           port: config.port,

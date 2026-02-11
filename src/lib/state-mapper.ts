@@ -13,6 +13,7 @@ import type {
   AgentConfig,
   AgentState,
 } from './types';
+import type { SessionLiveState } from './gateway-connection';
 
 // ---------------------------------------------------------------------------
 // Behavior metadata
@@ -27,7 +28,7 @@ export interface BehaviorInfo {
 }
 
 export const BEHAVIOR_INFO: Record<AgentBehavior, BehaviorInfo> = {
-  coding:         { label: 'Coding',         emoji: '💻', category: 'work',        color: '#4CAF50', neonColor: '#4FC3F7' },
+  working:        { label: 'Working',        emoji: '💻', category: 'work',        color: '#4CAF50', neonColor: '#4FC3F7' },
   thinking:       { label: 'Thinking',       emoji: '🤔', category: 'work',        color: '#FF9800', neonColor: '#FFCA28' },
   researching:    { label: 'Researching',    emoji: '📚', category: 'work',        color: '#2196F3', neonColor: '#42A5F5' },
   meeting:        { label: 'Meeting',        emoji: '🤝', category: 'work',        color: '#9C27B0', neonColor: '#AB47BC' },
@@ -61,9 +62,9 @@ export function isActiveBehavior(behavior: AgentBehavior): boolean {
 /** Map behavior → simplified office state */
 export function behaviorToOfficeState(behavior: AgentBehavior): AgentState {
   switch (behavior) {
-    case 'coding':
+    case 'working':
     case 'debugging':
-      return 'coding';
+      return 'working';
     case 'thinking':
       return 'thinking';
     case 'researching':
@@ -95,11 +96,59 @@ export function behaviorToOfficeState(behavior: AgentBehavior): AgentState {
 }
 
 // ---------------------------------------------------------------------------
+// Live state → AgentBehavior mapping (uses real gateway events)
+// ---------------------------------------------------------------------------
+
+/**
+ * Derive an AgentBehavior from real-time gateway event state.
+ *
+ * Pure 1:1 mapping from chatStatus (ChatEvent.state) to behavior — no
+ * time-based logic, no agentStatus checks.
+ *
+ * Mapping:
+ * - chatStatus "delta"   → working
+ * - chatStatus "final"   → idle
+ * - chatStatus "aborted" → dead
+ * - chatStatus "error"   → panicking
+ * - chatStatus null      → idle (no chat events seen)
+ *
+ * This function exists for backward compat with the pixel-art office view.
+ * It should be refactored later to let the UI interpret raw statuses directly.
+ */
+export function executionStateToBehavior(
+  live: SessionLiveState | undefined,
+  abortedLastRun: boolean | undefined,
+): AgentBehavior {
+  // If abortedLastRun is set in session metadata and we have no live state
+  // contradicting it, treat as dead
+  if (abortedLastRun && (!live || !live.chatStatus || live.chatStatus === 'aborted')) {
+    return 'dead';
+  }
+
+  if (!live || !live.chatStatus) {
+    return 'idle';
+  }
+
+  switch (live.chatStatus) {
+    case 'delta':
+      return 'working';
+    case 'final':
+      return 'idle';
+    case 'aborted':
+      return 'dead';
+    case 'error':
+      return 'panicking';
+    default:
+      return 'idle';
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Demo mode data generation
 // ---------------------------------------------------------------------------
 
 const DEMO_BEHAVIORS: AgentBehavior[] = [
-  'coding', 'thinking', 'researching', 'meeting', 'deploying',
+  'working', 'thinking', 'researching', 'meeting', 'deploying',
   'debugging', 'idle', 'coffee', 'sleeping', 'receiving_task', 'reporting',
 ];
 
@@ -218,7 +267,7 @@ export function generateDemoEvent(agents: AgentConfig[]): ActivityEvent {
   const type = types[Math.floor(Math.random() * types.length)];
 
   const messages: Record<ActivityEvent['type'], string[]> = {
-    state_change: ['Started coding', 'Now thinking...', 'Taking a coffee break', 'Deploying to production', 'Back to idle', 'Entering meeting room'],
+    state_change: ['Started working', 'Now thinking...', 'Taking a coffee break', 'Deploying to production', 'Back to idle', 'Entering meeting room'],
     task_start: ['New task: ' + DEMO_TASKS[Math.floor(Math.random() * DEMO_TASKS.length)]],
     task_complete: ['Completed: ' + DEMO_TASKS[Math.floor(Math.random() * DEMO_TASKS.length)]],
     task_fail: ['Failed: Connection timeout', 'Failed: Rate limit exceeded'],
