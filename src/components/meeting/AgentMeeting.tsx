@@ -1,127 +1,71 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from 'react';
-
-interface Message {
-  id: string;
-  agentId: string;
-  agentName: string;
-  agentEmoji: string;
-  agentType: 'main' | 'subagent' | 'acp';
-  content: string;
-  timestamp: number;
-}
+import React, { useRef } from 'react';
+import { useAgentChat } from './useAgentChat';
 
 interface AgentMeetingProps {
   agents?: any[];
 }
 
-// Detect agent type from session key
 function getAgentType(sessionKey: string): 'main' | 'subagent' | 'acp' {
   if (sessionKey.includes(':acp:')) return 'acp';
   if (sessionKey.includes(':subagent:')) return 'subagent';
   return 'main';
 }
 
-// Get agent type badge
 function getAgentTypeBadge(type: 'main' | 'subagent' | 'acp') {
   switch (type) {
-    case 'acp':
-      return { label: 'ACP', color: '#8B5CF6', emoji: '⚡' };
-    case 'subagent':
-      return { label: 'Sub-Agent', color: '#F59E0B', emoji: '🧩' };
-    default:
-      return { label: 'Main', color: '#10B981', emoji: '🤖' };
+    case 'acp': return { label: 'ACP', color: '#8B5CF6', emoji: '⚡' };
+    case 'subagent': return { label: 'Sub-Agent', color: '#F59E0B', emoji: '🧩' };
+    default: return { label: 'Main', color: '#10B981', emoji: '🤖' };
   }
 }
 
 export default function AgentMeeting({ agents = [] }: AgentMeetingProps) {
-  const [isMeetingActive, setIsMeetingActive] = useState(false);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [inputMessage, setInputMessage] = useState('');
+  const [isMeetingActive, setIsMeetingActive] = React.useState(false);
+  const [inputMessage, setInputMessage] = React.useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const {
+    messages,
+    connectedAgents,
+    sendMessage,
+    startMeeting,
+    endMeeting,
+    isConnected,
+  } = useAgentChat({ isActive: isMeetingActive });
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  useEffect(() => {
+  React.useEffect(() => {
     scrollToBottom();
   }, [messages]);
 
-  const startMeeting = () => {
+  const handleStartMeeting = () => {
     setIsMeetingActive(true);
-    setMessages([{
-      id: 'system-1',
-      agentId: 'system',
-      agentName: 'System',
-      agentEmoji: '🤖',
-      agentType: 'main',
-      content: 'Meeting started! All agents (Main, Sub-Agents, and ACP) can now collaborate.',
-      timestamp: Date.now(),
-    }]);
+    startMeeting();
   };
 
-  const endMeeting = () => {
+  const handleEndMeeting = () => {
     setIsMeetingActive(false);
-    setMessages([]);
+    endMeeting();
   };
 
-  const sendMessage = () => {
+  const handleSendMessage = () => {
     if (!inputMessage.trim() || !isMeetingActive) return;
-    
-    const newMessage: Message = {
-      id: `msg-${Date.now()}`,
-      agentId: 'user',
-      agentName: 'You',
-      agentEmoji: '👤',
-      agentType: 'main',
-      content: inputMessage.trim(),
-      timestamp: Date.now(),
-    };
-    
-    setMessages([...messages, newMessage]);
+    sendMessage(inputMessage.trim());
     setInputMessage('');
-    
-    // Simulate agent responses
-    setTimeout(() => {
-      const randomAgent = agents[Math.floor(Math.random() * agents.length)];
-      if (randomAgent) {
-        const agentType = getAgentType(randomAgent.key || '');
-        const badge = getAgentTypeBadge(agentType);
-        const responses = [
-          'I can help with that!',
-          'Working on it now...',
-          'Great idea! Let me contribute.',
-          'I have some insights on this.',
-          'Agreed! Let\'s move forward.',
-        ];
-        const agentMessage: Message = {
-          id: `agent-${Date.now()}`,
-          agentId: randomAgent.id,
-          agentName: randomAgent.name || 'Agent',
-          agentEmoji: randomAgent.emoji || badge.emoji,
-          agentType: agentType,
-          content: responses[Math.floor(Math.random() * responses.length)],
-          timestamp: Date.now(),
-        };
-        setMessages(prev => [...prev, agentMessage]);
-      }
-    }, 1500);
   };
 
-  // Get all unique agents from sessions
   const allAgents = React.useMemo(() => {
     const agentMap = new Map();
     agents.forEach(agent => {
       if (!agentMap.has(agent.id)) {
         const agentType = getAgentType(agent.key || '');
         const badge = getAgentTypeBadge(agentType);
-        agentMap.set(agent.id, {
-          ...agent,
-          agentType,
-          badge,
-        });
+        agentMap.set(agent.id, { ...agent, agentType, badge });
       }
     });
     return Array.from(agentMap.values());
@@ -135,14 +79,14 @@ export default function AgentMeeting({ agents = [] }: AgentMeetingProps) {
             💬 Agent Meeting Room
           </h2>
           <button
-            onClick={startMeeting}
+            onClick={handleStartMeeting}
             className="px-4 py-2 bg-[var(--accent-primary)] text-white rounded-lg hover:opacity-90 font-mono text-sm"
           >
             Start Meeting
           </button>
         </div>
         <p className="text-[var(--text-secondary)] text-sm mb-4">
-          Bring all your agents together for collaborative discussions. Supports Main agents, Sub-agents, and ACP agents (Codex, Claude Code).
+          Bring all your agents together for collaborative discussions via OpenClaw Gateway.
         </p>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
           <div className="flex items-center gap-1 text-[var(--text-secondary)]">
@@ -192,21 +136,33 @@ export default function AgentMeeting({ agents = [] }: AgentMeetingProps) {
     <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-6">
       <div className="flex items-center justify-between mb-4">
         <h2 className="font-pixel text-lg" style={{ color: 'var(--text-primary)' }}>
-          💬 Agent Meeting
+          💬 Agent Meeting {isConnected ? '🟢' : '🔴'}
         </h2>
         <button
-          onClick={endMeeting}
+          onClick={handleEndMeeting}
           className="px-3 py-1.5 bg-[var(--bg-secondary)] text-[var(--text-secondary)] rounded-lg hover:bg-white/10 text-sm"
         >
           End Meeting
         </button>
       </div>
 
+      {/* Connection Status */}
+      <div className="mb-4 p-3 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border)]">
+        <div className="flex items-center justify-between text-xs">
+          <span className="text-[var(--text-secondary)]">
+            Gateway: {isConnected ? 'Connected' : 'Connecting...'}
+          </span>
+          <span className="text-[var(--text-secondary)]">
+            Agents: {connectedAgents.length || allAgents.length}
+          </span>
+        </div>
+      </div>
+
       {/* Messages */}
       <div className="mb-4 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border)] p-4 h-96 overflow-y-auto">
         {messages.length === 0 ? (
           <div className="text-center text-[var(--text-secondary)] text-sm py-8">
-            Meeting started. Send a message to begin!
+            Meeting started. Waiting for messages...
           </div>
         ) : (
           <div className="space-y-3">
@@ -253,13 +209,15 @@ export default function AgentMeeting({ agents = [] }: AgentMeetingProps) {
           type="text"
           value={inputMessage}
           onChange={(e) => setInputMessage(e.target.value)}
-          onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
+          onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
           placeholder="Type a message..."
-          className="flex-1 px-4 py-2 bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)]"
+          disabled={!isConnected}
+          className="flex-1 px-4 py-2 bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)] disabled:opacity-50"
         />
         <button
-          onClick={sendMessage}
-          className="px-4 py-2 bg-[var(--accent-primary)] text-white rounded-lg hover:opacity-90 font-mono text-sm"
+          onClick={handleSendMessage}
+          disabled={!isConnected || !inputMessage.trim()}
+          className="px-4 py-2 bg-[var(--accent-primary)] text-white rounded-lg hover:opacity-90 font-mono text-sm disabled:opacity-50"
         >
           Send
         </button>
