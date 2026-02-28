@@ -12,7 +12,7 @@ import SettingsPanel from "@/components/settings/SettingsPanel";
 import MiniOffice from "@/components/office/MiniOffice";
 import TokenTracker from "@/components/TokenTracker";
 import PerformanceMetrics from "@/components/PerformanceMetrics";
-import CouncilChamber from "@/components/council/CouncilChamber";
+import AgentMeeting from "@/components/meeting/AgentMeeting";
 import KeyboardShortcuts from "@/components/KeyboardShortcuts";
 import { useAgents } from "@/hooks/useAgents";
 import type { AutoworkConfig, AutoworkPolicy, DashboardConfig } from "@/lib/types";
@@ -267,7 +267,7 @@ export default function DashboardPage() {
               <ActivityFeed events={activityFeed} />
               
               {/* AI Council Chamber */}
-              <CouncilChamber agents={agents} activeAgents={agents.filter(a => a.isActive).map(a => a.id)} />
+              <AgentMeeting agents={agents} />
             </div>
           </div>
         </div>
