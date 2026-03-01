@@ -30,7 +30,7 @@ export function ActivityTimeline({ data, agents, period = 'day' }: ActivityTimel
       
       const agentData = agentBucket.get(point.agentId)!;
       agentData.count++;
-      agentData.tokens += point.tokens;
+      agentData.tokens = (agentData.tokens || 0) + (point as any).tokens;
       
       const activityCount = agentData.activities.get(point.activity) || 0;
       agentData.activities.set(point.activity, activityCount + 1);
