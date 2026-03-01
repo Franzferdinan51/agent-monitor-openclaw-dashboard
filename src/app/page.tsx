@@ -204,7 +204,6 @@ export default function DashboardPage() {
             {/* BOTTOM SECTION */}
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-6">
               <div className="xl:col-span-2 space-y-6">
-                <MiniOffice agents={agents} agentStates={agentStates} ownerConfig={ownerConfig} theme={theme} />
                 <ActivityFeed events={activityFeed} />
               </div>
               <div className="space-y-6">
