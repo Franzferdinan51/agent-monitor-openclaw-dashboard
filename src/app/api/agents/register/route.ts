@@ -1,5 +1,9 @@
 import { NextResponse } from 'next/server';
-import { v4 as uuidv4 } from 'uuid';
+
+// Simple UUID generator (no dependencies)
+function generateId(): string {
+  return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+}
 
 interface RegisterRequest {
   agentName: string;
@@ -40,8 +44,8 @@ export async function POST(request: Request) {
     }
     
     // Generate unique ID and auth token
-    const agentId = `agent-${uuidv4()}`;
-    const authToken = uuidv4();
+    const agentId = `agent-${generateId()}`;
+    const authToken = generateId();
     
     // Create registration
     const registration: AgentRegistration = {
@@ -50,7 +54,7 @@ export async function POST(request: Request) {
       agentEmoji: body.agentEmoji || '🤖',
       agentColor: body.agentColor || '#3B82F6',
       computerName: body.computerName,
-      ipAddress: body.ipAddress || request.headers.get('x-forwarded-for') || 'unknown',
+      ipAddress: body.ipAddress || 'unknown',
       authToken,
       registeredAt: Date.now(),
       lastSeen: Date.now(),
@@ -61,7 +65,7 @@ export async function POST(request: Request) {
     // Store registration
     registeredAgents.set(agentId, registration);
     
-    console.log(`[Agent Registration] New agent registered: ${agentName} from ${computerName}`);
+    console.log(`[Agent Registration] New agent: ${body.agentName} from ${body.computerName}`);
     
     return NextResponse.json({
       ok: true,
