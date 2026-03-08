@@ -62,11 +62,19 @@ export default function DashboardPage() {
     loadChatHistory,
   } = useAgents(config.demoMode);
 
-  const openAgent = chatAgent ? agents.find((agent) => agent.id === chatAgent) : null;
+  const displayAgents = useMemo(() => {
+    const overrideMap = new Map(config.agents.map((agent) => [agent.id, agent]));
+    return agents.map((agent) => {
+      const override = overrideMap.get(agent.id);
+      return override ? { ...agent, ...override } : agent;
+    });
+  }, [agents, config.agents]);
+
+  const openAgent = chatAgent ? displayAgents.find((agent) => agent.id === chatAgent) : null;
   const ownerConfig = config.owner;
   const theme = config.theme;
   const tokenTotals = useTokenTracking(agentStates);
-  const primaryModel = agents.find((agent) => agentStates[agent.id])?.model || 'unknown';
+  const primaryModel = displayAgents.find((agent) => agentStates[agent.id])?.model || 'unknown';
 
   useEffect(() => {
     saveConfig(config);
@@ -153,7 +161,7 @@ export default function DashboardPage() {
         return (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <Leaderboard
-              entries={agents.map((a, i) => ({
+              entries={displayAgents.map((a, i) => ({
                 rank: i + 1,
                 agentId: a.id,
                 agentName: a.name || a.id,
@@ -164,7 +172,7 @@ export default function DashboardPage() {
               icon="📊"
             />
             <Leaderboard
-              entries={agents.map((a, i) => ({ rank: i + 1, agentId: a.id, agentName: a.name || a.id, agentEmoji: a.emoji || '🤖', value: 0 })).sort((a, b) => b.value - a.value)}
+              entries={displayAgents.map((a, i) => ({ rank: i + 1, agentId: a.id, agentName: a.name || a.id, agentEmoji: a.emoji || '🤖', value: 0 })).sort((a, b) => b.value - a.value)}
               title="Top Agents by Tasks"
               icon="✅"
             />
@@ -189,22 +197,33 @@ export default function DashboardPage() {
           <>
             {/* OFFICE VIEW - PROMINENT TOP POSITION */}
             <div className="mb-6">
-              <MiniOffice agents={agents} agentStates={agentStates} ownerConfig={ownerConfig} theme={theme} />
+              <MiniOffice agents={displayAgents} agentStates={agentStates} ownerConfig={ownerConfig} theme={theme} />
             </div>
 
             {/* AGENT GRID & SIDEBAR */}
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-6 mb-4 sm:mb-6">
               <div className="xl:col-span-2">
                 <AgentGrid
-                  agents={agents}
+                  agents={displayAgents}
                   agentStates={agentStates}
                   onChatClick={(id) => setChatAgent(id)}
                   onRestart={restartSession}
                   onUpdateAgent={(id, patch) => {
-                    setConfig((prev) => ({
-                      ...prev,
-                      agents: prev.agents.map((agent) => (agent.id === id ? { ...agent, ...patch } : agent)),
-                    }));
+                    setConfig((prev) => {
+                      const exists = prev.agents.some((agent) => agent.id === id);
+                      return {
+                        ...prev,
+                        agents: exists
+                          ? prev.agents.map((agent) => (agent.id === id ? { ...agent, ...patch } : agent))
+                          : [...prev.agents, {
+                              id,
+                              name: patch.name ?? displayAgents.find((agent) => agent.id === id)?.name ?? id,
+                              emoji: patch.emoji ?? displayAgents.find((agent) => agent.id === id)?.emoji ?? '🤖',
+                              color: patch.color ?? displayAgents.find((agent) => agent.id === id)?.color ?? '#4FC3F7',
+                              avatar: patch.avatar ?? displayAgents.find((agent) => agent.id === id)?.avatar ?? 'glasses',
+                            }],
+                      };
+                    });
                   }}
                 />
               </div>
@@ -216,7 +235,7 @@ export default function DashboardPage() {
                   model={primaryModel}
                 />
                 <PerformanceMetrics tasksCompleted={systemStats.completedTasks || 0} avgResponseTime={2.5} successRate={95} xp={xpState.totalXP} level={xpState.level} achievements={[]} />
-                <AgentMeeting agents={agents} />
+                <AgentMeeting agents={displayAgents} />
               </div>
             </div>
 
@@ -226,7 +245,7 @@ export default function DashboardPage() {
                 <ActivityFeed events={activityFeed} />
               </div>
               <div className="space-y-6">
-                <AutoworkPanel agents={agents} config={autoworkConfig} loading={autoworkLoading} saving={autoworkSaving} running={autoworkRunning} onSaveConfig={saveAutoworkConfig} onSavePolicy={async () => {}} onRunNow={runAutoworkNow} />
+                <AutoworkPanel agents={displayAgents} config={autoworkConfig} loading={autoworkLoading} saving={autoworkSaving} running={autoworkRunning} onSaveConfig={saveAutoworkConfig} onSavePolicy={async () => {}} onRunNow={runAutoworkNow} />
                 <SystemStats stats={systemStats} />
               </div>
             </div>
@@ -253,7 +272,7 @@ export default function DashboardPage() {
       </main>
 
       {openAgent && <ChatWindow agentId={openAgent.id} agentName={openAgent.name} agentEmoji={openAgent.emoji} agentColor={openAgent.color} messages={chatMessages[openAgent.id] || []} onSend={sendChat} onClose={() => setChatAgent(null)} />}
-      <GlobalChatPanel messages={globalChatMessages} connected={connected} demoMode={demoMode} totalAgents={agents.length} onSend={sendGlobalChat} />
+      <GlobalChatPanel messages={globalChatMessages} connected={connected} demoMode={demoMode} totalAgents={displayAgents.length} onSend={sendGlobalChat} />
       {showSettings && <SettingsPanel config={config} connected={connected} sessionCount={1} onUpdate={setConfig} onReset={() => {}} onClose={() => setShowSettings(false)} />}
       {showShortcuts && <KeyboardShortcuts isOpen={showShortcuts} onClose={() => setShowShortcuts(false)} />}
     </div>
