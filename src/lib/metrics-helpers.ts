@@ -114,8 +114,9 @@ export function calculateAvgResponseTime(
 }
 
 /**
- * Calculate productivity score from real agent activity
+ * Calculate activity score from real agent activity
  * Based on active agents, completed tasks, and message volume
+ * Note: This is an activity indicator score (0-100), not actual productivity metrics
  */
 export function calculateProductivityScore(
   agentStates: Record<string, AgentDashboardState>,
@@ -128,11 +129,13 @@ export function calculateProductivityScore(
     activeBehaviors.includes(state.behavior)
   ).length;
 
-  // Calculate base productivity
-  // Weight: active agents (40%), completed tasks (40%), messages (20%)
-  const activeScore = activeAgents * 15; // Max ~60 for 4 active agents
-  const taskScore = Math.min(completedTasks * 3, 30); // Cap at 30
-  const messageScore = Math.min(messages, 10); // Cap at 10
+  // Calculate activity score based on:
+  // - Active agents (up to 40 points)
+  // - Completed tasks (up to 40 points)
+  // - Messages sent (up to 20 points)
+  const activeScore = Math.min(activeAgents * 10, 40); // 10 pts per active agent, max 40
+  const taskScore = Math.min(completedTasks * 2, 40);  // 2 pts per task, max 40
+  const messageScore = Math.min(messages, 20);         // 1 pt per message, max 20
 
   const baseScore = activeScore + taskScore + messageScore;
 
