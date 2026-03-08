@@ -18,6 +18,7 @@ import Leaderboard from "@/components/achievements/Leaderboard";
 import MetricsDashboard from "@/components/metrics/MetricsDashboard";
 import KeyboardShortcuts from "@/components/KeyboardShortcuts";
 import { useAgents } from "@/hooks/useAgents";
+import { useTokenTracking } from "@/hooks/useMetrics";
 import { initialAchievementState, checkAchievements } from "@/lib/achievements";
 import { initialXPState, addXP, calculateTokenXP } from "@/lib/xp";
 import type { AutoworkConfig, AutoworkPolicy, DashboardConfig } from "@/lib/types";
@@ -64,6 +65,8 @@ export default function DashboardPage() {
   const openAgent = chatAgent ? agents.find((agent) => agent.id === chatAgent) : null;
   const ownerConfig = config.owner;
   const theme = config.theme;
+  const tokenTotals = useTokenTracking(agentStates);
+  const primaryModel = agents.find((agent) => agentStates[agent.id])?.model || 'unknown';
 
   useEffect(() => {
     saveConfig(config);
@@ -195,7 +198,12 @@ export default function DashboardPage() {
                 <AgentGrid agents={agents} agentStates={agentStates} onChatClick={(id) => setChatAgent(id)} onRestart={restartSession} />
               </div>
               <div className="space-y-6">
-                <TokenTracker totalTokens={systemStats.totalTokens || 0} inputTokens={systemStats.totalTokens || 0} outputTokens={0} />
+                <TokenTracker
+                  totalTokens={tokenTotals.totalTokens || 0}
+                  inputTokens={tokenTotals.inputTokens || 0}
+                  outputTokens={tokenTotals.outputTokens || 0}
+                  model={primaryModel}
+                />
                 <PerformanceMetrics tasksCompleted={systemStats.completedTasks || 0} avgResponseTime={2.5} successRate={95} xp={xpState.totalXP} level={xpState.level} achievements={[]} />
                 <AgentMeeting agents={agents} />
               </div>
