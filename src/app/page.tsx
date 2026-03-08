@@ -23,6 +23,14 @@ import { initialAchievementState, checkAchievements, getUnlockedAchievements } f
 import { calculateLevel, calculateProgress, calculateTokenXP } from "@/lib/xp";
 import type { AutoworkConfig, AutoworkPolicy, DashboardConfig } from "@/lib/types";
 import { clearConfig, loadConfig, saveConfig } from "@/lib/config";
+import {
+  calculateCompletedTasks,
+  calculateMeetings,
+  calculateMessages,
+  calculateAvgResponseTime,
+  calculateProductivityScore,
+  calculateAgentStats,
+} from "@/lib/metrics-helpers";
 
 const DEFAULT_AUTOWORK: AutoworkConfig = {
   maxSendsPerTick: 0, // Disabled by default
@@ -73,80 +81,36 @@ export default function DashboardPage() {
   const tokenTotals = useTokenTracking(agentStates);
   const primaryModel = displayAgents.find((agent) => agentStates[agent.id])?.model || 'unknown';
 
-  const agentActivityStats = useMemo(() => {
-    const stats = new Map<string, { workEvents: number; completions: number; messages: number; stateChanges: number; meetingSignals: number; responseSamples: number[]; lastActiveAt?: number }>();
-
-    const ensure = (agentId: string) => {
-      if (!stats.has(agentId)) {
-        stats.set(agentId, { workEvents: 0, completions: 0, messages: 0, stateChanges: 0, meetingSignals: 0, responseSamples: [] });
-      }
-      return stats.get(agentId)!;
-    };
-
-    const activeHints = ['working', 'researching', 'debugging', 'deploying', 'thinking', 'reporting', 'receiving'];
-
-    const ordered = [...activityFeed].sort((a, b) => a.timestamp - b.timestamp);
-    for (const event of ordered) {
-      if (!event.agentId) continue;
-      const bucket = ensure(event.agentId);
-
-      if (event.type === 'message') {
-        bucket.messages += 1;
-        bucket.completions += 1;
-        if (bucket.lastActiveAt) {
-          const seconds = Math.max(0, (event.timestamp - bucket.lastActiveAt) / 1000);
-          if (seconds > 0 && seconds < 3600) bucket.responseSamples.push(seconds);
-          bucket.lastActiveAt = undefined;
-        }
-      }
-
-      if (event.type === 'task_complete') {
-        bucket.completions += 1;
-      }
-
-      if (event.type === 'task_start' || event.type === 'tool_call') {
-        bucket.workEvents += 1;
-        if (!bucket.lastActiveAt) bucket.lastActiveAt = event.timestamp;
-      }
-
-      if (event.type === 'state_change') {
-        bucket.stateChanges += 1;
-        const lower = event.message.toLowerCase();
-        if (activeHints.some((hint) => lower.includes(hint))) {
-          bucket.workEvents += 1;
-          bucket.lastActiveAt = event.timestamp;
-        }
-        if (lower.includes('meeting')) {
-          bucket.meetingSignals += 1;
-        }
-      }
-    }
-
-    return stats;
+  // Calculate accurate metrics from live data
+  const derivedTaskCompleted = useMemo(() => {
+    return calculateCompletedTasks(activityFeed);
   }, [activityFeed]);
 
-  const derivedTaskCompleted = useMemo(() => {
-    const fromFeed = Array.from(agentActivityStats.values()).reduce((sum, entry) => sum + entry.completions, 0);
-    return Math.max(systemStats.completedTasks || 0, fromFeed);
-  }, [agentActivityStats, systemStats.completedTasks]);
-
   const derivedMeetings = useMemo(() => {
-    const activeMeetingAgents = Object.values(agentStates).filter((state) => state.behavior === 'meeting').length;
-    const feedMeetingSignals = Array.from(agentActivityStats.values()).reduce((sum, entry) => sum + entry.meetingSignals, 0);
-    return Math.max(activeMeetingAgents, feedMeetingSignals, systemStats.totalBroadcasts || 0);
-  }, [agentActivityStats, agentStates, systemStats.totalBroadcasts]);
+    return calculateMeetings(activityFeed, agentStates, globalChatMessages);
+  }, [activityFeed, agentStates, globalChatMessages]);
 
   const derivedMessages = useMemo(() => {
-    const threadMessages = Object.values(chatMessages).reduce((sum, msgs) => sum + msgs.length, 0);
-    const feedMessages = Array.from(agentActivityStats.values()).reduce((sum, entry) => sum + entry.messages, 0);
-    return Math.max(globalChatMessages.length + threadMessages, feedMessages);
-  }, [agentActivityStats, chatMessages, globalChatMessages.length]);
+    return calculateMessages(chatMessages, globalChatMessages, activityFeed);
+  }, [chatMessages, globalChatMessages, activityFeed]);
 
   const derivedAvgResponseTime = useMemo(() => {
-    const samples = Array.from(agentActivityStats.values()).flatMap((entry) => entry.responseSamples);
-    if (samples.length === 0) return 0;
-    return samples.reduce((sum, value) => sum + value, 0) / samples.length;
-  }, [agentActivityStats]);
+    return calculateAvgResponseTime(activityFeed, agentStates);
+  }, [activityFeed, agentStates]);
+
+  // Calculate per-agent stats for leaderboard
+  const agentStatsMap = useMemo(() => {
+    const stats = new Map<string, ReturnType<typeof calculateAgentStats>>();
+    for (const agent of displayAgents) {
+      const state = agentStates[agent.id];
+      if (!state) continue;
+      stats.set(
+        agent.id,
+        calculateAgentStats(agent.id, agent.name || agent.id, agent.emoji || '🤖', state, activityFeed)
+      );
+    }
+    return stats;
+  }, [displayAgents, agentStates, activityFeed]);
   const achievementState = useMemo(() => checkAchievements(initialAchievementState, {
     tokens_sent: tokenTotals.totalTokens || 0,
     tasks_completed: derivedTaskCompleted,
@@ -168,12 +132,8 @@ export default function DashboardPage() {
   const derivedProgress = useMemo(() => calculateProgress(derivedXP - currentLevelBase, derivedLevel), [derivedXP, currentLevelBase, derivedLevel]);
 
   const productivityScore = useMemo(() => {
-    const activeAgents = Object.values(agentStates).filter((state) => ['working', 'researching', 'debugging', 'deploying', 'reporting', 'thinking'].includes(state.behavior)).length;
-    const completions = derivedTaskCompleted;
-    const messages = derivedMessages;
-    const base = activeAgents * 12 + completions * 4 + Math.min(messages, 25);
-    return Math.max(0, Math.min(100, Math.round(base)));
-  }, [agentStates, derivedMessages, derivedTaskCompleted]);
+    return calculateProductivityScore(agentStates, derivedTaskCompleted, derivedMessages);
+  }, [agentStates, derivedTaskCompleted, derivedMessages]);
 
   useEffect(() => {
     saveConfig(config);
@@ -273,8 +233,8 @@ export default function DashboardPage() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <Leaderboard
               entries={[...displayAgents]
-                .map((a, i) => ({
-                  rank: i + 1,
+                .map((a) => ({
+                  rank: 0,
                   agentId: a.id,
                   agentName: a.name || a.id,
                   agentEmoji: a.emoji || '🤖',
@@ -287,12 +247,12 @@ export default function DashboardPage() {
             />
             <Leaderboard
               entries={[...displayAgents]
-                .map((a, i) => ({
-                  rank: i + 1,
+                .map((a) => ({
+                  rank: 0,
                   agentId: a.id,
                   agentName: a.name || a.id,
                   agentEmoji: a.emoji || '🤖',
-                  value: agentActivityStats.get(a.id)?.completions || 0,
+                  value: agentStatsMap.get(a.id)?.completedTasks || 0,
                 }))
                 .sort((a, b) => b.value - a.value)
                 .map((entry, index) => ({ ...entry, rank: index + 1 }))}
