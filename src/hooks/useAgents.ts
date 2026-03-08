@@ -513,6 +513,13 @@ export function useAgents(forceDemoMode = false): UseAgentsReturn {
               };
             }
 
+            // Check if transitioning from non-active to active behavior
+            const prevBehavior = prevBehaviorsRef.current[sessionId];
+            const wasActive = prevBehavior ? isActiveBehavior(prevBehavior as AgentBehavior) : false;
+            const isActive = isActiveBehavior(behavior);
+            // Reset startedAt when task becomes active (not late)
+            const taskStartTime = !wasActive && isActive ? Date.now() : (existing.currentTask?.startedAt ?? Date.now());
+
             return {
               ...prev,
               [sessionId]: {
@@ -525,12 +532,12 @@ export function useAgents(forceDemoMode = false): UseAgentsReturn {
                 toolPhase: tool.toolPhase,
                 statusSummary,
                 lastRunId: data.lastRunId ?? existing.lastRunId ?? null,
-                currentTask: isActiveBehavior(behavior)
+                currentTask: isActive
                   ? {
                       id: existing.currentTask?.id ?? `live-${sessionId}`,
                       title: statusSummary,
                       status: 'active',
-                      startedAt: existing.currentTask?.startedAt ?? Date.now(),
+                      startedAt: taskStartTime,
                     }
                   : null,
                 totalTasks: isActiveBehavior(behavior) ? Math.max(existing.totalTasks, 1) : existing.totalTasks,
@@ -595,145 +602,11 @@ export function useAgents(forceDemoMode = false): UseAgentsReturn {
       void syncGateway();
     }, 5_000);
 
-    // Named handler function for proper cleanup (fixes memory leak)
-    const handleStateEvent = (evt: MessageEvent) => {
-      if (cancelled) return;
-      try {
-        const data = JSON.parse(evt.data) as {
-          sessionKey: string;
-          chatStatus: string | null;
-          agentStatus: string | null;
-          agentEventData: Record<string, unknown> | null;
-          behavior: string;
-          agentName: string | null;
-          emoji: string | null;
-          toolName?: string | null;
-          toolPhase?: string | null;
-          statusSummary?: string;
-          lastRunId: string | null;
-        };
-
-        const sessionId = keyToIdRef.current[data.sessionKey];
-        if (!sessionId) return;
-
-        const behavior = (data.behavior ?? 'idle') as AgentBehavior;
-        const tool = data.toolName || data.toolPhase
-          ? { toolName: data.toolName ?? null, toolPhase: data.toolPhase ?? null }
-          : getToolSnapshot(data.agentEventData);
-        const statusSummary = data.statusSummary ?? summarizeExecution({
-          behavior,
-          agentStatus: data.agentStatus,
-          chatStatus: data.chatStatus,
-          agentEventData: data.agentEventData,
-          isSubagent: data.sessionKey.includes('subagent'),
-        });
-
-        let toolEvent: ActivityEvent | null = null;
-        let errorEvent: ActivityEvent | null = null;
-        let messageEvent: ActivityEvent | null = null;
-
-        setAgentStates((prev) => {
-          const existing = prev[sessionId];
-          if (!existing) return prev;
-
-          if (tool.toolName && tool.toolName !== existing.toolName) {
-            const meta = agentMetaRef.current[sessionId];
-            toolEvent = {
-              id: `tool-${Date.now()}-${++eventIdRef.current}-${sessionId}`,
-              agentId: sessionId,
-              agentName: meta?.name ?? data.agentName ?? sessionId,
-              agentEmoji: meta?.emoji ?? data.emoji ?? '🤖',
-              type: 'tool_call',
-              message: `${tool.toolName}${tool.toolPhase ? ` (${tool.toolPhase})` : ''}`,
-              timestamp: Date.now(),
-            };
-          }
-
-          if (data.agentStatus === 'error') {
-            const meta = agentMetaRef.current[sessionId];
-            errorEvent = {
-              id: `err-${Date.now()}-${++eventIdRef.current}-${sessionId}`,
-              agentId: sessionId,
-              agentName: meta?.name ?? data.agentName ?? sessionId,
-              agentEmoji: meta?.emoji ?? data.emoji ?? '🤖',
-              type: 'error',
-              message: statusSummary,
-              timestamp: Date.now(),
-            };
-          } else if (data.agentStatus === 'assistant' && data.chatStatus === 'final') {
-            const meta = agentMetaRef.current[sessionId];
-            messageEvent = {
-              id: `msg-${Date.now()}-${++eventIdRef.current}-${sessionId}`,
-              agentId: sessionId,
-              agentName: meta?.name ?? data.agentName ?? sessionId,
-              agentEmoji: meta?.emoji ?? data.emoji ?? '🤖',
-              type: 'message',
-              message: statusSummary,
-              timestamp: Date.now(),
-            };
-          }
-
-          return {
-            ...prev,
-            [sessionId]: {
-              ...existing,
-              behavior,
-              officeState: behaviorToOfficeState(behavior),
-              lastActivity: Date.now(),
-              streamType: data.agentStatus,
-              toolName: tool.toolName,
-              toolPhase: tool.toolPhase,
-              statusSummary,
-              lastRunId: data.lastRunId ?? existing.lastRunId ?? null,
-              currentTask: isActiveBehavior(behavior)
-                ? {
-                    id: existing.currentTask?.id ?? `live-${sessionId}`,
-                    title: statusSummary,
-                    status: 'active',
-                    startedAt: existing.currentTask?.startedAt ?? Date.now(),
-                  }
-                : null,
-              totalTasks: isActiveBehavior(behavior) ? Math.max(existing.totalTasks, 1) : existing.totalTasks,
-              sessionLog: [
-                ...existing.sessionLog.filter((line) => !line.startsWith('Status: ') && !line.startsWith('Tool: ')),
-                `Status: ${statusSummary}`,
-                ...(tool.toolName
-                  ? [`Tool: ${tool.toolName}${tool.toolPhase ? ` (${tool.toolPhase})` : ''}`]
-                  : []),
-              ].slice(-10),
-            },
-          };
-        });
-
-        const prevBehavior = prevBehaviorsRef.current[sessionId];
-        if (prevBehavior && prevBehavior !== behavior) {
-          const info = BEHAVIOR_INFO[behavior];
-          const meta = agentMetaRef.current[sessionId];
-          if (info && meta) {
-            pushActivity(setActivityFeed, {
-              id: `sse-${Date.now()}-${++eventIdRef.current}-${sessionId}`,
-              agentId: sessionId,
-              agentName: meta.name,
-              agentEmoji: meta.emoji,
-              type: 'state_change',
-              message: `${info.emoji} ${info.label}`,
-              timestamp: Date.now(),
-            });
-          }
-        }
-        prevBehaviorsRef.current[sessionId] = behavior;
-
-        if (toolEvent) pushActivity(setActivityFeed, toolEvent);
-        if (errorEvent) pushActivity(setActivityFeed, errorEvent);
-        if (messageEvent) pushActivity(setActivityFeed, messageEvent);
-      } catch {
-        // Ignore malformed events
-      }
-    };
-
     return () => {
       cancelled = true;
+      // Remove event listener before closing to prevent memory leaks
       if (eventSourceRef.current) {
+        eventSourceRef.current.removeEventListener('state', () => {});
         eventSourceRef.current.close();
         eventSourceRef.current = null;
       }
