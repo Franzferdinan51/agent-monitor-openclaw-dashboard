@@ -148,7 +148,8 @@ export default function DashboardPage() {
       if (data.ok && data.config) {
         setAutoworkConfig(data.config);
       }
-    } catch {
+    } catch (_error) {
+      // Ignore autowork load failures; panel will show current local state until retry.
     } finally {
       setAutoworkLoading(false);
     }
