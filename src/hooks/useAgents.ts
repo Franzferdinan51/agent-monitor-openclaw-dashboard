@@ -142,7 +142,9 @@ function buildSessionLog(sess: GatewaySessionInfo): string[] {
   const log = [
     `Model: ${sess.modelProvider ? `${sess.modelProvider}/` : ''}${sess.model}`,
     `Channel: ${sess.channel || 'default'}${sess.kind ? ` (${sess.kind})` : ''}`,
-    `Tokens: ${sess.totalTokens.toLocaleString()} total (${(sess.inputTokens ?? 0).toLocaleString()} in / ${(sess.outputTokens ?? 0).toLocaleString()} out)`,
+    sess.usageKnown === false
+      ? 'Tokens: not reported by gateway for this session'
+      : `Tokens: ${sess.totalTokens.toLocaleString()} total (${(sess.inputTokens ?? 0).toLocaleString()} in / ${(sess.outputTokens ?? 0).toLocaleString()} out)`,
     sess.statusSummary ? `Status: ${sess.statusSummary}` : '',
     sess.currentToolName
       ? `Tool: ${sess.currentToolName}${sess.currentToolPhase ? ` (${sess.currentToolPhase})` : ''}`
@@ -220,6 +222,7 @@ function sessionToDashboardState(sess: GatewaySessionInfo): AgentDashboardState 
     inputTokens: sess.inputTokens ?? 0,
     outputTokens: sess.outputTokens ?? 0,
     totalTokens: sess.totalTokens,
+    usageKnown: sess.usageKnown !== false,
     contextTokens: sess.contextTokens,
     maxContextTokens: sess.contextTokens,
     totalTasks: currentTask ? 1 : 0,

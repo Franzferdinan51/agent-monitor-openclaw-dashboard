@@ -182,7 +182,13 @@ export default function AgentCard({ agent, state, onChatClick, onRestart }: Agen
 
       {/* Token bar */}
       <div className="mb-2">
-        <TokenBar used={state?.totalTokens ?? 0} max={state?.contextTokens || 128000} />
+        {state?.usageKnown === false ? (
+          <span className="text-[10px] font-mono" style={{ color: 'var(--text-secondary)' }}>
+            Tokens not reported
+          </span>
+        ) : (
+          <TokenBar used={state?.totalTokens ?? 0} max={state?.contextTokens || 128000} />
+        )}
       </div>
 
       {agent.lastMessagePreview && (
