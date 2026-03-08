@@ -195,7 +195,18 @@ export default function DashboardPage() {
             {/* AGENT GRID & SIDEBAR */}
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-6 mb-4 sm:mb-6">
               <div className="xl:col-span-2">
-                <AgentGrid agents={agents} agentStates={agentStates} onChatClick={(id) => setChatAgent(id)} onRestart={restartSession} />
+                <AgentGrid
+                  agents={agents}
+                  agentStates={agentStates}
+                  onChatClick={(id) => setChatAgent(id)}
+                  onRestart={restartSession}
+                  onUpdateAgent={(id, patch) => {
+                    setConfig((prev) => ({
+                      ...prev,
+                      agents: prev.agents.map((agent) => (agent.id === id ? { ...agent, ...patch } : agent)),
+                    }));
+                  }}
+                />
               </div>
               <div className="space-y-6">
                 <TokenTracker
