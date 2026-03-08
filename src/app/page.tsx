@@ -18,9 +18,9 @@ import Leaderboard from "@/components/achievements/Leaderboard";
 import MetricsDashboard from "@/components/metrics/MetricsDashboard";
 import KeyboardShortcuts from "@/components/KeyboardShortcuts";
 import { useAgents } from "@/hooks/useAgents";
-import { useTokenTracking } from "@/hooks/useMetrics";
-import { initialAchievementState, checkAchievements } from "@/lib/achievements";
-import { initialXPState, addXP, calculateTokenXP } from "@/lib/xp";
+import { useMetrics, useTokenTracking } from "@/hooks/useMetrics";
+import { initialAchievementState, checkAchievements, getUnlockedAchievements } from "@/lib/achievements";
+import { calculateLevel, calculateProgress, calculateTokenXP } from "@/lib/xp";
 import type { AutoworkConfig, AutoworkPolicy, DashboardConfig } from "@/lib/types";
 import { clearConfig, loadConfig, saveConfig } from "@/lib/config";
 
@@ -43,9 +43,6 @@ export default function DashboardPage() {
   const [autoworkSaving, setAutoworkSaving] = useState(false);
   const [autoworkRunning, setAutoworkRunning] = useState(false);
   const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
-  
-  const [achievementState, setAchievementState] = useState(initialAchievementState);
-  const [xpState, setXpState] = useState(initialXPState);
 
   const {
     agents,
@@ -75,34 +72,59 @@ export default function DashboardPage() {
   const theme = config.theme;
   const tokenTotals = useTokenTracking(agentStates);
   const primaryModel = displayAgents.find((agent) => agentStates[agent.id])?.model || 'unknown';
+  const metrics = useMetrics({
+    agentStates,
+    agentConfigs: displayAgents.map((agent) => ({ id: agent.id, name: agent.name, emoji: agent.emoji, model: agent.model })),
+    activityFeed,
+    enabled: true,
+    refreshInterval: 30000,
+  });
+
+  const derivedTaskCompleted = useMemo(() => {
+    const feedCompleted = activityFeed.filter((event) => event.type === 'task_complete' || event.type === 'message').length;
+    return Math.max(systemStats.completedTasks || 0, metrics.taskMetrics.completed || 0, feedCompleted);
+  }, [activityFeed, metrics.taskMetrics.completed, systemStats.completedTasks]);
+
+  const derivedMeetings = useMemo(
+    () => activityFeed.filter((event) => event.message.toLowerCase().includes('meeting')).length,
+    [activityFeed],
+  );
+
+  const derivedMessages = useMemo(() => {
+    const threadMessages = Object.values(chatMessages).reduce((sum, msgs) => sum + msgs.length, 0);
+    return globalChatMessages.length + threadMessages;
+  }, [chatMessages, globalChatMessages.length]);
+
+  const achievementState = useMemo(() => checkAchievements(initialAchievementState, {
+    tokens_sent: tokenTotals.totalTokens || 0,
+    tasks_completed: derivedTaskCompleted,
+    meetings_attended: derivedMeetings,
+    messages_sent: derivedMessages,
+    days_active: 1,
+  }), [tokenTotals.totalTokens, derivedTaskCompleted, derivedMeetings, derivedMessages]);
+
+  const unlockedAchievements = useMemo(() => getUnlockedAchievements(achievementState.achievements), [achievementState.achievements]);
+  const derivedXP = useMemo(() => achievementState.totalXP + calculateTokenXP(tokenTotals.totalTokens || 0), [achievementState.totalXP, tokenTotals.totalTokens]);
+  const derivedLevel = useMemo(() => calculateLevel(derivedXP), [derivedXP]);
+  const currentLevelBase = useMemo(() => {
+    let spent = 0;
+    for (let level = 1; level < derivedLevel; level += 1) {
+      spent += Math.floor(100 * Math.pow(1.5, level - 1));
+    }
+    return spent;
+  }, [derivedLevel]);
+  const derivedProgress = useMemo(() => calculateProgress(derivedXP - currentLevelBase, derivedLevel), [derivedXP, currentLevelBase, derivedLevel]);
+
+  const productivityScore = useMemo(() => {
+    if (metrics.agentProductivities.length === 0) return connected ? 100 : 0;
+    const avg = metrics.agentProductivities.reduce((sum, entry) => sum + entry.productivityScore, 0) / metrics.agentProductivities.length;
+    return Math.max(0, Math.min(100, Math.round(avg)));
+  }, [metrics.agentProductivities, connected]);
 
   useEffect(() => {
     saveConfig(config);
   }, [config]);
 
-  useEffect(() => {
-    const stats = {
-      tokens_sent: systemStats.totalTokens || 0,
-      tasks_completed: systemStats.completedTasks || 0,
-      meetings_attended: 0,
-      messages_sent: globalChatMessages.length,
-      days_active: 1,
-    };
-    
-    const newState = checkAchievements(achievementState, stats);
-    if (newState.totalXP !== achievementState.totalXP) {
-      const xpGained = newState.totalXP - achievementState.totalXP;
-      setXpState(prev => addXP(prev, xpGained, 'achievements', 'Achievement unlocked!'));
-    }
-    setAchievementState(newState);
-  }, [systemStats.totalTokens, systemStats.completedTasks, globalChatMessages.length]);
-
-  useEffect(() => {
-    if (systemStats.totalTokens > 0) {
-      const tokenXP = calculateTokenXP(systemStats.totalTokens);
-      setXpState(prev => ({ ...prev, totalXP: prev.totalXP + tokenXP }));
-    }
-  }, [systemStats.totalTokens]);
 
   const loadAutowork = useCallback(async () => {
     try {
@@ -156,23 +178,53 @@ export default function DashboardPage() {
   const renderTab = () => {
     switch (activeTab) {
       case 'achievements':
-        return <AchievementList achievements={achievementState.achievements} filter="all" />;
+        return (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-card)] p-4">
+                <div className="text-xs text-[var(--text-secondary)]">Unlocked</div>
+                <div className="text-2xl font-bold text-[var(--text-primary)]">{achievementState.unlockedCount}/{achievementState.achievements.length}</div>
+              </div>
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-card)] p-4">
+                <div className="text-xs text-[var(--text-secondary)]">Achievement XP</div>
+                <div className="text-2xl font-bold text-[var(--accent-primary)]">{achievementState.totalXP.toLocaleString()}</div>
+              </div>
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-card)] p-4">
+                <div className="text-xs text-[var(--text-secondary)]">Level Progress</div>
+                <div className="text-2xl font-bold text-[var(--text-primary)]">{derivedLevel} · {derivedProgress.toFixed(0)}%</div>
+              </div>
+            </div>
+            <AchievementList achievements={achievementState.achievements} filter="all" />
+          </div>
+        );
       case 'leaderboard':
         return (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <Leaderboard
-              entries={displayAgents.map((a, i) => ({
-                rank: i + 1,
-                agentId: a.id,
-                agentName: a.name || a.id,
-                agentEmoji: a.emoji || '🤖',
-                value: agentStates[a.id]?.totalTokens || 0,
-              })).sort((a, b) => b.value - a.value)}
+              entries={[...displayAgents]
+                .map((a, i) => ({
+                  rank: i + 1,
+                  agentId: a.id,
+                  agentName: a.name || a.id,
+                  agentEmoji: a.emoji || '🤖',
+                  value: agentStates[a.id]?.totalTokens || 0,
+                }))
+                .sort((a, b) => b.value - a.value)
+                .map((entry, index) => ({ ...entry, rank: index + 1 }))}
               title="Top Agents by Tokens"
               icon="📊"
             />
             <Leaderboard
-              entries={displayAgents.map((a, i) => ({ rank: i + 1, agentId: a.id, agentName: a.name || a.id, agentEmoji: a.emoji || '🤖', value: 0 })).sort((a, b) => b.value - a.value)}
+              entries={[...displayAgents]
+                .map((a, i) => ({
+                  rank: i + 1,
+                  agentId: a.id,
+                  agentName: a.name || a.id,
+                  agentEmoji: a.emoji || '🤖',
+                  value: agentStates[a.id]?.totalTasks || 0,
+                }))
+                .sort((a, b) => b.value - a.value)
+                .map((entry, index) => ({ ...entry, rank: index + 1 }))}
               title="Top Agents by Tasks"
               icon="✅"
             />
@@ -182,12 +234,12 @@ export default function DashboardPage() {
         return (
           <MetricsDashboard
             data={{
-              tokensSent: systemStats.totalTokens || 0,
-              tasksCompleted: systemStats.completedTasks || 0,
-              meetingsAttended: 0,
-              messagesSent: globalChatMessages.length,
-              avgResponseTime: 2.5,
-              productivityScore: 85,
+              tokensSent: tokenTotals.totalTokens || 0,
+              tasksCompleted: derivedTaskCompleted,
+              meetingsAttended: derivedMeetings,
+              messagesSent: derivedMessages,
+              avgResponseTime: metrics.responseMetrics.avg || 0,
+              productivityScore,
             }}
             period="weekly"
           />
@@ -234,7 +286,14 @@ export default function DashboardPage() {
                   outputTokens={tokenTotals.outputTokens || 0}
                   model={primaryModel}
                 />
-                <PerformanceMetrics tasksCompleted={systemStats.completedTasks || 0} avgResponseTime={2.5} successRate={95} xp={xpState.totalXP} level={xpState.level} achievements={[]} />
+                <PerformanceMetrics
+                  tasksCompleted={derivedTaskCompleted}
+                  avgResponseTime={metrics.responseMetrics.avg || 0}
+                  successRate={metrics.taskMetrics.total > 0 ? (100 - metrics.taskMetrics.failureRate) : 100}
+                  xp={derivedXP}
+                  level={derivedLevel}
+                  achievements={unlockedAchievements.map((achievement) => achievement.name)}
+                />
                 <AgentMeeting agents={displayAgents} />
               </div>
             </div>
