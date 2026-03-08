@@ -161,6 +161,23 @@ export default function DashboardPage() {
     }
   }, []);
 
+  const saveAutoworkPolicy = useCallback(async (sessionKey: string, patch: Partial<AutoworkPolicy>) => {
+    try {
+      setAutoworkSaving(true);
+      const response = await fetch("/api/gateway/autowork", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionKey, ...patch }),
+      });
+      const data = await response.json();
+      if (data.ok && data.config) {
+        setAutoworkConfig(data.config);
+      }
+    } finally {
+      setAutoworkSaving(false);
+    }
+  }, []);
+
   const runAutoworkNow = useCallback(async (sessionKey?: string) => {
     try {
       setAutoworkRunning(true);
@@ -304,7 +321,7 @@ export default function DashboardPage() {
                 <ActivityFeed events={activityFeed} />
               </div>
               <div className="space-y-6">
-                <AutoworkPanel agents={displayAgents} config={autoworkConfig} loading={autoworkLoading} saving={autoworkSaving} running={autoworkRunning} onSaveConfig={saveAutoworkConfig} onSavePolicy={async () => {}} onRunNow={runAutoworkNow} />
+                <AutoworkPanel agents={displayAgents} config={autoworkConfig} loading={autoworkLoading} saving={autoworkSaving} running={autoworkRunning} onSaveConfig={saveAutoworkConfig} onSavePolicy={saveAutoworkPolicy} onRunNow={runAutoworkNow} />
                 <SystemStats stats={systemStats} />
               </div>
             </div>
