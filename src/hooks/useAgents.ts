@@ -362,10 +362,21 @@ export function useAgents(forceDemoMode = false): UseAgentsReturn {
 
       for (const sess of sortedSessions) {
         const prevBehavior = prevBehaviorsRef.current[sess.id];
-        if (prevBehavior && prevBehavior !== sess.behavior) {
-          const info = BEHAVIOR_INFO[(sess.behavior ?? 'idle') as AgentBehavior];
-          const agent = newAgents.find((entry) => entry.id === sess.id);
-          if (agent && info) {
+        const info = BEHAVIOR_INFO[(sess.behavior ?? 'idle') as AgentBehavior];
+        const agent = newAgents.find((entry) => entry.id === sess.id);
+
+        if (agent && info) {
+          if (prevBehavior === undefined) {
+            pushActivity(setActivityFeed, {
+              id: `gw-init-${Date.now()}-${++eventIdRef.current}-${sess.id}`,
+              agentId: sess.id,
+              agentName: agent.name,
+              agentEmoji: agent.emoji,
+              type: 'state_change',
+              message: `${info.emoji} ${info.label}`,
+              timestamp: Date.now(),
+            });
+          } else if (prevBehavior !== sess.behavior) {
             pushActivity(setActivityFeed, {
               id: `gw-${Date.now()}-${++eventIdRef.current}-${sess.id}`,
               agentId: sess.id,
